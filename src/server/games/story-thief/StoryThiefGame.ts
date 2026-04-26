@@ -1,5 +1,5 @@
 import type { Room } from '@/types/hub';
-import type { StoryThiefState, Story, QuestionEntry } from '@/types/games/story-thief';
+import type { StoryThiefState, Story } from '@/types/games/story-thief';
 import type { StoryThiefClientState, VoteResult } from '@/types/socket-events';
 import { STORY_CATEGORIES, HINT_CARDS } from '@/types/games/story-thief';
 
@@ -58,6 +58,67 @@ export function createGame(room: Room): StoryThiefState {
 
 export function getGameState(roomCode: string): StoryThiefState | undefined {
   return gameStates.get(roomCode);
+}
+
+/**
+ * Swap a player's old socket ID for a new one in all game state references.
+ * Called when a player reconnects with a new socket ID.
+ */
+export function swapPlayerId(roomCode: string, oldId: string, newId: string): void {
+  const state = gameStates.get(roomCode);
+  if (!state) return;
+
+  // submittedPlayers Set
+  if (state.submittedPlayers.has(oldId)) {
+    state.submittedPlayers.delete(oldId);
+    state.submittedPlayers.add(newId);
+  }
+
+  // scores
+  if (state.scores[oldId] !== undefined) {
+    state.scores[newId] = state.scores[oldId];
+    delete state.scores[oldId];
+  }
+
+  // votes (as voter)
+  if (state.votes[oldId] !== undefined) {
+    state.votes[newId] = state.votes[oldId];
+    delete state.votes[oldId];
+  }
+
+  // votes (as suspect — update values pointing to old ID)
+  for (const [voterId, suspectId] of Object.entries(state.votes)) {
+    if (suspectId === oldId) {
+      state.votes[voterId] = newId;
+    }
+  }
+
+  // needsReplacement
+  if (state.needsReplacement === oldId) {
+    state.needsReplacement = newId;
+  }
+
+  // currentStory author
+  if (state.currentStory && state.currentStory.authorId === oldId) {
+    state.currentStory.authorId = newId;
+  }
+
+  // Story piles — update authorId in all stories
+  for (const pile of Object.values(state.storyPiles)) {
+    for (const story of pile) {
+      if (story.authorId === oldId) {
+        story.authorId = newId;
+      }
+    }
+  }
+
+  // Questions — update askedBy and answer playerIds
+  for (const q of state.questions) {
+    if (q.askedBy === oldId) q.askedBy = newId;
+    for (const a of q.answers) {
+      if (a.playerId === oldId) a.playerId = newId;
+    }
+  }
 }
 
 export function submitStory(roomCode: string, playerId: string, text: string, room: Room): StoryThiefState | null {
@@ -134,44 +195,6 @@ export function moveToQuestioning(roomCode: string, room: Room): StoryThiefState
   }
 
   return state;
-}
-
-export function addQuestion(roomCode: string, playerId: string, text: string, room: Room): QuestionEntry | null {
-  const state = gameStates.get(roomCode);
-  if (!state || state.phase !== 'questioning') return null;
-
-  // Only non-bluffing team members can ask
-  const bluffingTeam = room.teams[state.bluffingTeamIndex];
-  const player = room.players[playerId];
-  if (!player || player.teamId === bluffingTeam.id) return null;
-
-  const question: QuestionEntry = {
-    id: generateId(),
-    askedBy: playerId,
-    text,
-    answers: [],
-  };
-
-  state.questions.push(question);
-  return question;
-}
-
-export function answerQuestion(roomCode: string, questionId: string, playerId: string, text: string, room: Room): boolean {
-  const state = gameStates.get(roomCode);
-  if (!state || state.phase !== 'questioning') return false;
-
-  // Only bluffing team members can answer
-  const bluffingTeam = room.teams[state.bluffingTeamIndex];
-  const player = room.players[playerId];
-  if (!player || player.teamId !== bluffingTeam.id) return false;
-
-  const question = state.questions.find(q => q.id === questionId);
-  if (!question) return false;
-
-  if (question.answers.some(a => a.playerId === playerId)) return false;
-
-  question.answers.push({ playerId, text });
-  return true;
 }
 
 export function moveToVoting(roomCode: string): StoryThiefState | null {

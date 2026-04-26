@@ -4,11 +4,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { connectSocket, getSocket } from '@/lib/socket/client';
 import type { Room, RoomSettings } from '@/types/hub';
 
-// Module-level state so it survives across component re-mounts during navigation
+// Module-level state — survives component remounts and page navigation
 let _room: Room | null = null;
 let _playerId: string | null = null;
 let _connected = false;
 const _listeners = new Set<() => void>();
+let _socketBound = false;
 
 function notifyListeners() {
   _listeners.forEach((fn) => fn());
@@ -24,6 +25,28 @@ function setGlobalPlayerId(id: string | null) {
   notifyListeners();
 }
 
+// Bind socket listeners once globally — not per component mount
+function ensureSocketBound() {
+  if (_socketBound) return;
+  _socketBound = true;
+
+  const socket = connectSocket();
+
+  socket.on('connect', () => {
+    _connected = true;
+    notifyListeners();
+  });
+
+  socket.on('disconnect', () => {
+    _connected = false;
+    notifyListeners();
+  });
+
+  socket.on('hub:roomUpdated', (updatedRoom: Room) => {
+    setGlobalRoom(updatedRoom);
+  });
+}
+
 export function useRoom() {
   const [room, setRoom] = useState<Room | null>(_room);
   const [playerId, setPlayerId] = useState<string | null>(_playerId);
@@ -31,7 +54,8 @@ export function useRoom() {
   const [connected, setConnected] = useState(_connected);
 
   useEffect(() => {
-    // Sync from global state
+    ensureSocketBound();
+
     const listener = () => {
       setRoom(_room);
       setPlayerId(_playerId);
@@ -39,36 +63,16 @@ export function useRoom() {
     };
     _listeners.add(listener);
 
-    const socket = connectSocket();
+    // Sync immediately in case state changed while unmounted
+    listener();
 
-    const onConnect = () => {
-      _connected = true;
-      notifyListeners();
-    };
-    const onDisconnect = () => {
-      _connected = false;
-      notifyListeners();
-    };
-    const onRoomUpdated = (updatedRoom: Room) => {
-      setGlobalRoom(updatedRoom);
-    };
+    // Listen for errors (these are per-component since they're UI-specific)
+    const socket = getSocket();
     const onError = (msg: string) => setError(msg);
-
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
-    socket.on('hub:roomUpdated', onRoomUpdated);
     socket.on('hub:error', onError);
-
-    // If already connected, set state immediately
-    if (socket.connected) {
-      setConnected(true);
-    }
 
     return () => {
       _listeners.delete(listener);
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
-      socket.off('hub:roomUpdated', onRoomUpdated);
       socket.off('hub:error', onError);
     };
   }, []);
@@ -80,7 +84,6 @@ export function useRoom() {
         if (res.success && res.room && res.playerId) {
           setGlobalRoom(res.room);
           setGlobalPlayerId(res.playerId);
-          // Save to sessionStorage for reconnection
           if (typeof window !== 'undefined') {
             sessionStorage.setItem('playerName', playerName);
             sessionStorage.setItem('roomCode', res.room.code);
@@ -102,7 +105,6 @@ export function useRoom() {
         if (res.success && res.room && res.playerId) {
           setGlobalRoom(res.room);
           setGlobalPlayerId(res.playerId);
-          // Save to sessionStorage for reconnection
           if (typeof window !== 'undefined') {
             sessionStorage.setItem('playerName', playerName);
             sessionStorage.setItem('roomCode', res.room.code);

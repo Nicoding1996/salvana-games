@@ -38,9 +38,13 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       callback({ success: true, room: result.room, playerId: socket.id });
 
       if (result.reconnected) {
-        // Reconnecting player — send them the current game state if game is active
+        // Reconnecting player — swap IDs in game state and send current state
         console.log(`[Room] ${data.playerName} reconnected to ${data.code}`);
         if (result.room.currentGameId === 'story-thief') {
+          // Find the old socket ID by checking what was swapped
+          // The RoomManager already swapped the ID in room.players, so we need
+          // to swap it in the game state too. We stored the old ID in the result.
+          StoryThief.swapPlayerId(result.room.code, result.oldId, socket.id);
           const clientState = StoryThief.getClientState(result.room.code, socket.id, result.room);
           if (clientState) {
             socket.emit('story-thief:stateUpdated', clientState);

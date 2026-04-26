@@ -27,38 +27,66 @@ const initialState: StoryThiefClientState = {
   storyCategory: null,
 };
 
+// Module-level state — survives component remounts
+let _gameState: StoryThiefClientState = initialState;
+let _timerSeconds: number | null = null;
+let _lastVoteResult: VoteResult | null = null;
+const _listeners = new Set<() => void>();
+let _socketBound = false;
+
+function notifyListeners() {
+  _listeners.forEach((fn) => fn());
+}
+
+// Bind socket listeners once globally (not per component mount)
+function ensureSocketBound() {
+  if (_socketBound) return;
+  _socketBound = true;
+
+  const socket = getSocket();
+
+  socket.on('story-thief:stateUpdated', (state) => {
+    _gameState = state;
+    if (state.timerSeconds !== null) {
+      _timerSeconds = state.timerSeconds;
+    }
+    if (state.phase !== 'result') {
+      _lastVoteResult = null;
+    }
+    notifyListeners();
+  });
+
+  socket.on('story-thief:timerTick', (seconds) => {
+    _timerSeconds = seconds;
+    notifyListeners();
+  });
+
+  socket.on('story-thief:voteResult', (result) => {
+    _lastVoteResult = result;
+    notifyListeners();
+  });
+}
+
 export function useStoryThief() {
-  const [gameState, setGameState] = useState<StoryThiefClientState>(initialState);
-  const [timerSeconds, setTimerSeconds] = useState<number | null>(null);
-  const [lastVoteResult, setLastVoteResult] = useState<VoteResult | null>(null);
+  const [gameState, setGameState] = useState<StoryThiefClientState>(_gameState);
+  const [timerSeconds, setTimerSeconds] = useState<number | null>(_timerSeconds);
+  const [lastVoteResult, setLastVoteResult] = useState<VoteResult | null>(_lastVoteResult);
 
   useEffect(() => {
-    const socket = getSocket();
+    ensureSocketBound();
 
-    socket.on('story-thief:stateUpdated', (state) => {
-      setGameState(state);
-      if (state.timerSeconds !== null) {
-        setTimerSeconds(state.timerSeconds);
-      }
-      // Reset lastVoteResult when we move past the result phase
-      // so the next round doesn't show stale data
-      if (state.phase !== 'result') {
-        setLastVoteResult(null);
-      }
-    });
+    const listener = () => {
+      setGameState(_gameState);
+      setTimerSeconds(_timerSeconds);
+      setLastVoteResult(_lastVoteResult);
+    };
+    _listeners.add(listener);
 
-    socket.on('story-thief:timerTick', (seconds) => {
-      setTimerSeconds(seconds);
-    });
-
-    socket.on('story-thief:voteResult', (result) => {
-      setLastVoteResult(result);
-    });
+    // Sync immediately in case state changed while unmounted
+    listener();
 
     return () => {
-      socket.off('story-thief:stateUpdated');
-      socket.off('story-thief:timerTick');
-      socket.off('story-thief:voteResult');
+      _listeners.delete(listener);
     };
   }, []);
 

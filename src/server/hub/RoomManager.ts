@@ -64,7 +64,7 @@ export function createRoom(hostSocketId: string, playerName: string): { room: Ro
  * Join a room. If a player with the same name already exists and is disconnected,
  * reconnect them with the new socket ID instead of creating a duplicate.
  */
-export function joinRoom(code: string, socketId: string, playerName: string): { room: Room; player: Player; reconnected: boolean } | { error: string } {
+export function joinRoom(code: string, socketId: string, playerName: string): { room: Room; player: Player; reconnected: boolean; oldId: string } | { error: string } {
   const room = rooms.get(code.toUpperCase());
   if (!room) return { error: 'Room not found' };
 
@@ -99,7 +99,7 @@ export function joinRoom(code: string, socketId: string, playerName: string): { 
 
     room.lastActivity = Date.now();
     console.log(`[Room] ${playerName} reconnected to ${code} (${oldId} → ${socketId})`);
-    return { room, player: existingPlayer, reconnected: true };
+    return { room, player: existingPlayer, reconnected: true, oldId };
   }
 
   // New player joining
@@ -121,7 +121,7 @@ export function joinRoom(code: string, socketId: string, playerName: string): { 
 
   autoAssignTeam(room, socketId);
 
-  return { room, player, reconnected: false };
+  return { room, player, reconnected: false, oldId: '' };
 }
 
 export function leaveRoom(socketId: string): { room: Room; wasHost: boolean } | null {
