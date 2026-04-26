@@ -163,6 +163,7 @@ export function leaveRoom(socketId: string): { room: Room; wasHost: boolean } | 
 
 /**
  * Mark a player as disconnected (don't remove them — they might reconnect).
+ * If the host disconnects, transfer host to another connected player.
  */
 export function markDisconnected(socketId: string): Room | null {
   const code = playerRoomMap.get(socketId);
@@ -174,6 +175,20 @@ export function markDisconnected(socketId: string): Room | null {
   const player = room.players[socketId];
   if (player) {
     player.connected = false;
+
+    // Transfer host if the disconnected player was host
+    if (room.hostId === socketId) {
+      const connectedPlayers = Object.values(room.players).filter(p => p.connected);
+      if (connectedPlayers.length > 0) {
+        // Old host loses host status
+        player.isHost = false;
+        // New host
+        const newHost = connectedPlayers[0];
+        room.hostId = newHost.id;
+        newHost.isHost = true;
+        console.log(`[Room] Host transferred from ${player.name} to ${newHost.name} in ${room.code}`);
+      }
+    }
   }
 
   room.lastActivity = Date.now();
