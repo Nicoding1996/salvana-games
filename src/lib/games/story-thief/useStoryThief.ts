@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { getSocket } from '@/lib/socket/client';
-import type { StoryThiefClientState, VoteResult, Question } from '@/types/socket-events';
+import type { StoryThiefClientState, VoteResult } from '@/types/socket-events';
 
 const initialState: StoryThiefClientState = {
   phase: 'setup',
@@ -40,29 +40,15 @@ export function useStoryThief() {
       if (state.timerSeconds !== null) {
         setTimerSeconds(state.timerSeconds);
       }
+      // Reset lastVoteResult when we move past the result phase
+      // so the next round doesn't show stale data
+      if (state.phase !== 'result') {
+        setLastVoteResult(null);
+      }
     });
 
     socket.on('story-thief:timerTick', (seconds) => {
       setTimerSeconds(seconds);
-    });
-
-    socket.on('story-thief:questionAsked', (question) => {
-      setGameState(prev => ({
-        ...prev,
-        questions: [...prev.questions, question],
-        questionCount: prev.questionCount + 1,
-      }));
-    });
-
-    socket.on('story-thief:questionAnswered', (data) => {
-      setGameState(prev => ({
-        ...prev,
-        questions: prev.questions.map(q =>
-          q.id === data.questionId
-            ? { ...q, answers: [...q.answers, { playerId: '', playerName: data.answeredBy, text: data.text }] }
-            : q
-        ),
-      }));
     });
 
     socket.on('story-thief:voteResult', (result) => {
@@ -72,22 +58,12 @@ export function useStoryThief() {
     return () => {
       socket.off('story-thief:stateUpdated');
       socket.off('story-thief:timerTick');
-      socket.off('story-thief:questionAsked');
-      socket.off('story-thief:questionAnswered');
       socket.off('story-thief:voteResult');
     };
   }, []);
 
   const submitStory = useCallback((text: string) => {
     getSocket().emit('story-thief:submitStory', { text });
-  }, []);
-
-  const askQuestion = useCallback((text: string) => {
-    getSocket().emit('story-thief:askQuestion', { text });
-  }, []);
-
-  const answerQuestion = useCallback((questionId: string, text: string) => {
-    getSocket().emit('story-thief:answerQuestion', { questionId, text });
   }, []);
 
   const submitVote = useCallback((suspectId: string) => {
@@ -115,8 +91,6 @@ export function useStoryThief() {
     timerSeconds,
     lastVoteResult,
     submitStory,
-    askQuestion,
-    answerQuestion,
     submitVote,
     endQuestionPhase,
     submitReplacement,

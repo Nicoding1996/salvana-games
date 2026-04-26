@@ -23,14 +23,12 @@ export default function WriteStory({ onSubmit, hasSubmitted, submittedCount, tot
   if (hasSubmitted) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
-        <div className="text-5xl mb-4">✅</div>
-        <h2 className="text-xl font-bold mb-2">Story Submitted!</h2>
-        <p className="text-(--text-secondary) text-center mb-6">
-          Waiting for others...
-        </p>
-        <div className="bg-(--bg-card) rounded-2xl px-6 py-3">
-          <span className="text-2xl font-bold">{submittedCount}</span>
-          <span className="text-(--text-secondary)"> / {totalPlayers}</span>
+        <div className="text-4xl mb-4">✓</div>
+        <h2 className="text-lg font-semibold mb-1">Story Submitted</h2>
+        <p className="text-(--text-muted) text-sm mb-6">Waiting for others...</p>
+        <div className="bg-(--bg-card) border border-(--border) rounded-xl px-5 py-2.5">
+          <span className="text-xl font-bold text-(--game-accent)">{submittedCount}</span>
+          <span className="text-(--text-muted)"> / {totalPlayers}</span>
         </div>
       </div>
     );
@@ -39,14 +37,12 @@ export default function WriteStory({ onSubmit, hasSubmitted, submittedCount, tot
   return (
     <div className="flex-1 flex flex-col p-4 animate-slide-up">
       <div className="text-center mb-4">
-        <h2 className="text-xl font-bold mb-1">Write Your Truth</h2>
+        <h2 className="text-lg font-semibold mb-1">📜 Write Your Truth</h2>
         {category && (
-          <p className="text-(--accent) text-sm">
-            💡 Suggestion: {category}
-          </p>
+          <p className="text-(--game-accent) text-sm">{category}</p>
         )}
-        <p className="text-(--text-secondary) text-xs mt-1">
-          Write something true about yourself. Others will try to guess whose story it is!
+        <p className="text-(--text-muted) text-xs mt-1">
+          Something true about you. Others will try to guess whose it is.
         </p>
       </div>
 
@@ -54,8 +50,8 @@ export default function WriteStory({ onSubmit, hasSubmitted, submittedCount, tot
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Once upon a time, I actually..."
-          className="flex-1 min-h-[150px] p-4 bg-(--bg-card) rounded-2xl text-base outline-none focus:ring-2 focus:ring-(--accent) placeholder:text-(--text-secondary) resize-none"
+          placeholder="Once, I actually..."
+          className="flex-1 min-h-[140px] p-4 bg-(--bg-card) border border-(--border) rounded-xl text-base outline-none focus:border-(--game-accent) transition-colors placeholder:text-(--text-muted) resize-none"
           autoFocus
           aria-label="Write your true story"
         />
@@ -65,11 +61,11 @@ export default function WriteStory({ onSubmit, hasSubmitted, submittedCount, tot
         <button
           onClick={handleSubmit}
           disabled={!text.trim()}
-          className="w-full py-4 bg-(--accent) hover:bg-[#d63d56] disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl text-lg font-semibold transition-all active:scale-95"
+          className="w-full py-3.5 bg-(--game-accent) text-(--bg-primary) disabled:opacity-30 rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
         >
-          Submit Story
+          Submit
         </button>
-        <p className="text-center text-xs text-(--text-secondary) mt-2">
+        <p className="text-center text-xs text-(--text-muted) mt-2">
           {submittedCount} / {totalPlayers} submitted
         </p>
       </div>

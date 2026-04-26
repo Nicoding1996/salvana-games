@@ -3,13 +3,14 @@
 import { useState } from 'react';
 
 interface Props {
+  story: string;
   bluffingTeamMembers: { id: string; name: string; avatar: string }[];
   isOnBluffingTeam: boolean;
   hasVoted: boolean;
   onVote: (suspectId: string) => void;
 }
 
-export default function VotingPhase({ bluffingTeamMembers, isOnBluffingTeam, hasVoted, onVote }: Props) {
+export default function VotingPhase({ story, bluffingTeamMembers, isOnBluffingTeam, hasVoted, onVote }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
 
   const handleVote = () => {
@@ -21,10 +22,10 @@ export default function VotingPhase({ bluffingTeamMembers, isOnBluffingTeam, has
   if (isOnBluffingTeam) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
-        <div className="text-5xl mb-4">🎭</div>
-        <h2 className="text-xl font-bold mb-2">Voting in Progress</h2>
-        <p className="text-(--text-secondary) text-center">
-          The other teams are deciding who they think wrote the story...
+        <div className="text-4xl mb-4">🎭</div>
+        <h2 className="text-lg font-semibold mb-1">Voting in Progress</h2>
+        <p className="text-(--text-muted) text-sm text-center">
+          They&apos;re deciding who wrote it...
         </p>
       </div>
     );
@@ -33,10 +34,10 @@ export default function VotingPhase({ bluffingTeamMembers, isOnBluffingTeam, has
   if (hasVoted) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
-        <div className="text-5xl mb-4">✅</div>
-        <h2 className="text-xl font-bold mb-2">Vote Submitted!</h2>
-        <p className="text-(--text-secondary) text-center">
-          Waiting for everyone to vote...
+        <div className="text-4xl mb-4">✓</div>
+        <h2 className="text-lg font-semibold mb-1">Vote Locked</h2>
+        <p className="text-(--text-muted) text-sm text-center">
+          Waiting for everyone...
         </p>
       </div>
     );
@@ -44,30 +45,34 @@ export default function VotingPhase({ bluffingTeamMembers, isOnBluffingTeam, has
 
   return (
     <div className="flex-1 flex flex-col p-4 animate-slide-up">
-      <div className="text-center mb-6">
-        <h2 className="text-xl font-bold mb-1">Who Wrote It?</h2>
-        <p className="text-(--text-secondary) text-sm">
-          Tap the person you think is the real author
-        </p>
+      {/* Story reminder */}
+      <div className="bg-(--bg-card) border border-(--border) rounded-xl p-3 mb-4">
+        <p className="text-xs text-(--text-muted) mb-1">📜 The story was:</p>
+        <p className="text-sm leading-relaxed">&ldquo;{story}&rdquo;</p>
       </div>
 
-      <div className="flex-1 space-y-3">
+      <div className="text-center mb-4">
+        <h2 className="text-lg font-semibold mb-0.5">Whose Truth?</h2>
+        <p className="text-(--text-muted) text-sm">Tap who you think wrote it</p>
+      </div>
+
+      <div className="flex-1 space-y-2">
         {bluffingTeamMembers.map((member) => (
           <button
             key={member.id}
             onClick={() => setSelected(member.id)}
-            className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] ${
+            className={`w-full flex items-center gap-3.5 p-3.5 rounded-xl transition-all active:scale-[0.98] ${
               selected === member.id
-                ? 'bg-(--accent) ring-2 ring-(--accent)'
-                : 'bg-(--bg-card) hover:bg-(--bg-secondary)'
+                ? 'bg-(--game-accent) text-(--bg-primary)'
+                : 'bg-(--bg-card) border border-(--border) hover:border-(--game-accent)/40'
             }`}
             aria-label={`Vote for ${member.name}`}
             aria-pressed={selected === member.id}
           >
-            <span className="text-3xl">{member.avatar}</span>
-            <span className="text-lg font-medium">{member.name}</span>
+            <span className="text-2xl">{member.avatar}</span>
+            <span className="text-base font-medium">{member.name}</span>
             {selected === member.id && (
-              <span className="ml-auto text-xl">✓</span>
+              <span className="ml-auto">✓</span>
             )}
           </button>
         ))}
@@ -77,7 +82,7 @@ export default function VotingPhase({ bluffingTeamMembers, isOnBluffingTeam, has
         <button
           onClick={handleVote}
           disabled={!selected}
-          className="w-full py-4 bg-(--accent) hover:bg-[#d63d56] disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl text-lg font-semibold transition-all active:scale-95"
+          className="w-full py-3.5 bg-(--game-accent) text-(--bg-primary) disabled:opacity-30 rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
         >
           Lock In Vote
         </button>

@@ -1,35 +1,139 @@
 @import "tailwindcss";
 
+/* ============================================
+   Salvana Games — Design System
+   ============================================ */
+
 :root {
-  --bg-primary: #0f0f1a;
-  --bg-secondary: #1a1a2e;
-  --bg-card: #16213e;
-  --accent: #e94560;
-  --accent-secondary: #533483;
-  --text-primary: #ffffff;
-  --text-secondary: #a0a0b8;
+  /* Background layers — more contrast between them */
+  --bg-primary: #06060c;
+  --bg-secondary: #0c0c16;
+  --bg-card: #131322;
+  --bg-elevated: #1b1b30;
+  --bg-hover: #22223a;
+
+  /* Text hierarchy */
+  --text-primary: #ededf4;
+  --text-secondary: #9494ae;
+  --text-muted: #55556e;
+
+  /* Borders */
+  --border: #1e1e34;
+  --border-light: #2a2a44;
+
+  /* Brand — Salvana Games identity */
+  --brand: #f0a050;
+  --brand-dim: rgba(240, 160, 80, 0.10);
+
+  /* Game: Whose Truth? — warm amber/gold */
+  --game-accent: #e8a849;
+  --game-accent-dim: rgba(232, 168, 73, 0.10);
+  --game-accent-strong: #f5c04d;
+  --game-secondary: #9b7bdf;
+  --game-secondary-dim: rgba(155, 123, 223, 0.10);
+
+  /* Semantic */
+  --success: #5ee89e;
+  --success-dim: rgba(94, 232, 158, 0.10);
+  --danger: #f87171;
+  --danger-dim: rgba(248, 113, 113, 0.10);
+
+  /* Fonts */
+  --font-heading: var(--font-heading, 'Space Grotesk', system-ui, sans-serif);
+  --font-body: var(--font-body, 'DM Sans', system-ui, sans-serif);
 }
 
-* {
-  -webkit-tap-highlight-color: transparent;
-}
+* { -webkit-tap-highlight-color: transparent; }
 
 body {
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: var(--font-body);
   min-height: 100dvh;
   overscroll-behavior: none;
 }
 
-/* Prevent zoom on input focus (iOS) */
-input, textarea, select {
-  font-size: 16px !important;
+/* App background — subtle radial gradient for depth */
+.app-bg {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(232, 168, 73, 0.04) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 50% 100%, rgba(155, 123, 223, 0.03) 0%, transparent 50%),
+    var(--bg-primary);
 }
 
-/* Smooth animations */
+/* Headings use the display font */
+h1, h2, h3 {
+  font-family: var(--font-heading);
+}
+
+input, textarea, select { font-size: 16px !important; }
+
+/* ============================================
+   Component Styles
+   ============================================ */
+
+/* Story card — the centerpiece */
+.story-card {
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(27, 27, 48, 0.8) 100%);
+  border: 1px solid rgba(232, 168, 73, 0.15);
+  position: relative;
+  overflow: hidden;
+}
+
+.story-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--game-accent), transparent);
+  opacity: 0.5;
+}
+
+/* Game buttons */
+.btn-game {
+  background: var(--game-accent);
+  color: var(--bg-primary);
+  font-family: var(--font-heading);
+  font-weight: 600;
+  border-radius: 12px;
+  transition: all 0.15s ease;
+}
+
+.btn-game:active {
+  transform: scale(0.97);
+}
+
+.btn-game:disabled {
+  opacity: 0.3;
+}
+
+/* Settings pill buttons */
+.pill {
+  border-radius: 10px;
+  transition: all 0.15s ease;
+  font-family: var(--font-body);
+}
+
+.pill-active {
+  background: var(--brand);
+  color: var(--bg-primary);
+  font-weight: 600;
+}
+
+.pill-inactive {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+/* ============================================
+   Animations
+   ============================================ */
+
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -38,28 +142,63 @@ input, textarea, select {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(233, 69, 96, 0.3); }
-  50% { box-shadow: 0 0 40px rgba(233, 69, 96, 0.6); }
+@keyframes pullFromPile {
+  0% { opacity: 0; transform: translateY(40px) scale(0.85); filter: blur(4px); }
+  60% { opacity: 1; transform: translateY(-8px) scale(1.02); filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
 }
 
-@keyframes cardFlip {
-  0% { transform: rotateY(90deg) scale(0.8); opacity: 0; }
-  100% { transform: rotateY(0deg) scale(1); opacity: 1; }
+@keyframes celebrateBounce {
+  0% { transform: scale(0.3); opacity: 0; }
+  50% { transform: scale(1.2); }
+  70% { transform: scale(0.9); }
+  100% { transform: scale(1); opacity: 1; }
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.3s ease-out;
+@keyframes confettiDrop {
+  0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(80px) rotate(720deg); opacity: 0; }
 }
 
-.animate-slide-up {
-  animation: slideUp 0.4s ease-out;
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(232, 168, 73, 0.08), 0 0 60px rgba(232, 168, 73, 0.04); }
+  50% { box-shadow: 0 0 30px rgba(232, 168, 73, 0.15), 0 0 80px rgba(232, 168, 73, 0.06); }
 }
 
-.animate-pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
+@keyframes softPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
-.animate-card-flip {
-  animation: cardFlip 0.6s ease-out;
+@keyframes timerUrgent {
+  0%, 100% { color: var(--danger); transform: scale(1); }
+  50% { color: var(--danger); transform: scale(1.08); }
+}
+
+.animate-fade-in { animation: fadeIn 0.2s ease-out; }
+.animate-slide-up { animation: slideUp 0.35s ease-out; }
+.animate-pull-from-pile { animation: pullFromPile 0.7s cubic-bezier(0.22, 1, 0.36, 1); }
+.animate-celebrate { animation: celebrateBounce 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.animate-soft-pulse { animation: softPulse 2s ease-in-out infinite; }
+.animate-glow-pulse { animation: glowPulse 3s ease-in-out infinite; }
+.animate-timer-urgent { animation: timerUrgent 0.5s ease-in-out infinite; }
+
+/* Confetti */
+.confetti-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 50;
+  overflow: hidden;
+}
+
+.confetti-piece {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  animation: confettiDrop 1.8s ease-in forwards;
 }

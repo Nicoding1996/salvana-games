@@ -255,6 +255,38 @@ export function assignTeam(socketId: string, playerId: string, teamId: string): 
   return room;
 }
 
+export function shuffleTeams(socketId: string): Room | null {
+  const room = getRoomByPlayer(socketId);
+  if (!room || room.hostId !== socketId) return null;
+  if (room.phase !== 'lobby') return null;
+
+  // Clear all teams
+  for (const team of room.teams) {
+    team.playerIds = [];
+  }
+  for (const player of Object.values(room.players)) {
+    player.teamId = null;
+  }
+
+  // Shuffle player IDs
+  const playerIds = Object.keys(room.players);
+  for (let i = playerIds.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [playerIds[i], playerIds[j]] = [playerIds[j], playerIds[i]];
+  }
+
+  // Round-robin assign to teams
+  for (let i = 0; i < playerIds.length; i++) {
+    const teamIndex = i % room.teams.length;
+    const team = room.teams[teamIndex];
+    team.playerIds.push(playerIds[i]);
+    room.players[playerIds[i]].teamId = team.id;
+  }
+
+  room.lastActivity = Date.now();
+  return room;
+}
+
 function autoAssignTeam(room: Room, playerId: string): void {
   const smallest = room.teams.reduce((min, team) =>
     team.playerIds.length < min.playerIds.length ? team : min

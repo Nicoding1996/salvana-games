@@ -9,45 +9,59 @@ interface Props {
 
 export default function StoryReveal({ story, bluffingTeamMembers, isOnBluffingTeam, isMyStory }: Props) {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6">
-      {/* Story Card */}
-      <div className="bg-(--bg-card) rounded-3xl p-6 w-full max-w-sm animate-card-flip shadow-lg border border-(--accent-secondary)/30">
-        <div className="text-center mb-4">
-          <span className="text-3xl">📖</span>
+    <div className="flex-1 flex flex-col items-center justify-center px-5 py-8">
+      {/* The story card — dramatic pull from pile */}
+      <div className="w-full max-w-sm animate-pull-from-pile">
+        <div className="story-card rounded-2xl p-7 animate-glow-pulse">
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <span className="text-xl">📜</span>
+            <span className="text-[10px] uppercase tracking-[0.2em] text-(--game-accent) font-medium">Whose Truth?</span>
+          </div>
+          <p className="text-lg leading-relaxed text-center font-medium">
+            &ldquo;{story}&rdquo;
+          </p>
         </div>
-        <p className="text-lg leading-relaxed text-center">
-          &ldquo;{story}&rdquo;
-        </p>
       </div>
 
-      {/* Role indicator */}
-      <div className="mt-6 text-center animate-fade-in">
+      {/* Role badge — appears after card */}
+      <div className="mt-8 animate-slide-up" style={{ animationDelay: '0.4s', animationFillMode: 'backwards' }}>
         {isMyStory && (
-          <div className="bg-(--accent)/20 border border-(--accent) rounded-2xl px-4 py-2">
-            <p className="text-(--accent) font-semibold">🎯 This is YOUR story!</p>
-            <p className="text-xs text-(--text-secondary) mt-1">Answer truthfully when questioned</p>
+          <div className="bg-(--game-accent-dim) border border-(--game-accent)/30 rounded-full px-5 py-2.5 flex items-center gap-2">
+            <span>🎯</span>
+            <div>
+              <p className="text-(--game-accent) font-semibold text-sm">Your story</p>
+              <p className="text-[11px] text-(--text-muted)">Answer truthfully</p>
+            </div>
           </div>
         )}
         {isOnBluffingTeam && !isMyStory && (
-          <div className="bg-(--accent-secondary)/20 border border-(--accent-secondary) rounded-2xl px-4 py-2">
-            <p className="text-(--accent-secondary) font-semibold">🎭 Claim this is yours!</p>
-            <p className="text-xs text-(--text-secondary) mt-1">Bluff convincingly when questioned</p>
+          <div className="bg-(--game-secondary-dim) border border-(--game-secondary)/30 rounded-full px-5 py-2.5 flex items-center gap-2">
+            <span>🎭</span>
+            <div>
+              <p className="text-(--game-secondary) font-semibold text-sm">Claim it&apos;s yours</p>
+              <p className="text-[11px] text-(--text-muted)">Read it. Own it. Bluff it.</p>
+            </div>
           </div>
         )}
         {!isOnBluffingTeam && (
-          <div className="bg-(--bg-card) rounded-2xl px-4 py-2">
-            <p className="font-semibold">🔍 Who wrote this?</p>
-            <p className="text-xs text-(--text-secondary) mt-1">Get ready to ask questions!</p>
+          <div className="bg-(--bg-card) border border-(--border) rounded-full px-5 py-2.5 flex items-center gap-2">
+            <span>🔍</span>
+            <div>
+              <p className="font-semibold text-sm">Who wrote this?</p>
+              <p className="text-[11px] text-(--text-muted)">Get ready to investigate</p>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Suspects */}
-      <div className="mt-4 flex gap-3 flex-wrap justify-center">
+      {/* Suspects row */}
+      <div className="mt-6 flex gap-5 flex-wrap justify-center animate-fade-in" style={{ animationDelay: '0.6s', animationFillMode: 'backwards' }}>
         {bluffingTeamMembers.map((member) => (
-          <div key={member.id} className="flex flex-col items-center animate-slide-up">
-            <span className="text-2xl">{member.avatar}</span>
-            <span className="text-xs text-(--text-secondary)">{member.name}</span>
+          <div key={member.id} className="flex flex-col items-center gap-1">
+            <div className="w-12 h-12 rounded-full bg-(--bg-card) border border-(--border) flex items-center justify-center text-2xl">
+              {member.avatar}
+            </div>
+            <span className="text-[11px] text-(--text-muted)">{member.name}</span>
           </div>
         ))}
       </div>

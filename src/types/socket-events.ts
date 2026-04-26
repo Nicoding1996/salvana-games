@@ -13,12 +13,11 @@ export interface ClientToServerEvents {
   'hub:leaveRoom': () => void;
   'hub:updateSettings': (settings: Partial<RoomSettings>) => void;
   'hub:assignTeam': (data: { playerId: string; teamId: string }) => void;
+  'hub:shuffleTeams': () => void;
   'hub:startGame': (gameId: string) => void;
 
   // Story Thief
   'story-thief:submitStory': (data: { text: string }) => void;
-  'story-thief:askQuestion': (data: { text: string }) => void;
-  'story-thief:answerQuestion': (data: { questionId: string; text: string }) => void;
   'story-thief:submitVote': (data: { suspectId: string }) => void;
   'story-thief:endQuestionPhase': () => void;
   'story-thief:submitReplacement': (data: { text: string }) => void;
@@ -37,8 +36,6 @@ export interface ServerToClientEvents {
   // Story Thief
   'story-thief:stateUpdated': (state: StoryThiefClientState) => void;
   'story-thief:phaseChanged': (phase: StoryThiefPhase) => void;
-  'story-thief:questionAsked': (question: Question) => void;
-  'story-thief:questionAnswered': (data: { questionId: string; answeredBy: string; text: string }) => void;
   'story-thief:timerTick': (secondsLeft: number) => void;
   'story-thief:voteResult': (result: VoteResult) => void;
 }

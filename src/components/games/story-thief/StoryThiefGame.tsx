@@ -22,19 +22,31 @@ export default function StoryThiefGame({ room, playerId, isHost }: Props) {
 
   const myTeamId = room.players[playerId]?.teamId;
   const isOnBluffingTeam = myTeamId === gameState.bluffingTeamId;
+  const myTeam = room.teams.find(t => t.id === myTeamId);
+  const myTeamScore = myTeamId ? (gameState.teamScores[myTeamId] || 0) : 0;
+  const bluffingTeam = room.teams.find(t => t.id === gameState.bluffingTeamId);
+  const isInGame = gameState.phase !== 'setup' && gameState.phase !== 'finished';
 
   return (
     <div className="flex-1 flex flex-col max-w-lg mx-auto w-full">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-(--bg-card)">
-        <div className="text-sm">
-          <span className="text-(--text-secondary)">Round </span>
-          <span className="font-bold">{gameState.roundNumber}</span>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-(--border)">
+        <div className="text-xs text-(--text-muted)">
+          R<span className="text-(--text-primary) font-medium">{gameState.roundNumber || '—'}</span>
         </div>
-        <div className="text-sm font-mono text-(--text-secondary)">{room.code}</div>
-        <div className="text-sm">
-          <span className="text-(--text-secondary)">Score </span>
-          <span className="font-bold">{gameState.scores[playerId] || 0}</span>
+        {/* Bluffing team indicator — shown during active rounds */}
+        {isInGame && bluffingTeam ? (
+          <div className="text-xs flex items-center gap-1.5">
+            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: bluffingTeam.color }} />
+            <span style={{ color: bluffingTeam.color }} className="font-medium">{bluffingTeam.name}</span>
+            <span className="text-(--text-muted)">bluffs</span>
+          </div>
+        ) : (
+          <div className="text-xs font-mono text-(--text-muted)">{room.code}</div>
+        )}
+        <div className="text-xs">
+          <span className="font-medium" style={{ color: myTeam?.color }}>{myTeamScore}</span>
+          <span className="text-(--text-muted)"> pts</span>
         </div>
       </div>
 
@@ -75,6 +87,7 @@ export default function StoryThiefGame({ room, playerId, isHost }: Props) {
 
         {gameState.phase === 'voting' && (
           <VotingPhase
+            story={gameState.currentStory || ''}
             bluffingTeamMembers={gameState.bluffingTeamMembers}
             isOnBluffingTeam={isOnBluffingTeam}
             hasVoted={gameState.hasVoted}
@@ -94,6 +107,8 @@ export default function StoryThiefGame({ room, playerId, isHost }: Props) {
             category={gameState.storyCategory}
             scores={gameState.scores}
             teamScores={gameState.teamScores}
+            playerId={playerId}
+            roundNumber={gameState.roundNumber}
           />
         )}
 

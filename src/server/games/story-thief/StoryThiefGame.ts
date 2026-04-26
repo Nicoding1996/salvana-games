@@ -226,12 +226,7 @@ export function calculateResults(roomCode: string, room: Room): VoteResult | nul
   const realAuthor = room.players[realAuthorId];
   const bluffingTeam = room.teams[state.bluffingTeamIndex];
 
-  const pointsAwarded: Record<string, number> = {};
   const teamPointsAwarded: Record<string, number> = {};
-
-  for (const pid of Object.keys(room.players)) {
-    pointsAwarded[pid] = 0;
-  }
   for (const team of room.teams) {
     teamPointsAwarded[team.id] = 0;
   }
@@ -239,27 +234,44 @@ export function calculateResults(roomCode: string, room: Room): VoteResult | nul
   let correctGuesses = 0;
   let totalVotes = 0;
 
-  for (const [voterId, suspectId] of Object.entries(state.votes)) {
+  for (const [, suspectId] of Object.entries(state.votes)) {
     totalVotes++;
     if (suspectId === realAuthorId) {
-      pointsAwarded[voterId] = (pointsAwarded[voterId] || 0) + 3;
-      const voterTeam = room.players[voterId]?.teamId;
-      if (voterTeam) teamPointsAwarded[voterTeam] = (teamPointsAwarded[voterTeam] || 0) + 3;
       correctGuesses++;
-    } else {
-      pointsAwarded[suspectId] = (pointsAwarded[suspectId] || 0) + 1;
-      teamPointsAwarded[bluffingTeam.id] = (teamPointsAwarded[bluffingTeam.id] || 0) + 1;
     }
   }
 
-  if (totalVotes > 0 && correctGuesses <= totalVotes / 2) {
-    pointsAwarded[realAuthorId] = (pointsAwarded[realAuthorId] || 0) + 2;
-    teamPointsAwarded[bluffingTeam.id] = (teamPointsAwarded[bluffingTeam.id] || 0) + 2;
+  // Fixed 5-point pot per round
+  // Majority correct → guessing teams each get 5
+  // Majority wrong or tied → bluffing team gets 5
+  const ROUND_POT = 5;
+  const majorityCorrect = totalVotes > 0 && correctGuesses > totalVotes / 2;
+
+  if (majorityCorrect) {
+    // Each guessing team gets the full pot
+    const guessingTeamIds = new Set<string>();
+    for (const [voterId] of Object.entries(state.votes)) {
+      const voterTeam = room.players[voterId]?.teamId;
+      if (voterTeam && voterTeam !== bluffingTeam.id) {
+        guessingTeamIds.add(voterTeam);
+      }
+    }
+    for (const tid of guessingTeamIds) {
+      teamPointsAwarded[tid] = ROUND_POT;
+    }
+  } else {
+    teamPointsAwarded[bluffingTeam.id] = ROUND_POT;
   }
 
-  for (const [pid, pts] of Object.entries(pointsAwarded)) {
-    state.scores[pid] = (state.scores[pid] || 0) + pts;
+  // Track individual stats for end-of-game superlatives (stored in scores map)
+  // scores[playerId] = number of correct guesses (for "Best Detective")
+  for (const [voterId, suspectId] of Object.entries(state.votes)) {
+    if (suspectId === realAuthorId) {
+      state.scores[voterId] = (state.scores[voterId] || 0) + 1;
+    }
   }
+
+  // Apply team points
   for (const [tid, pts] of Object.entries(teamPointsAwarded)) {
     state.teamScores[tid] = (state.teamScores[tid] || 0) + pts;
   }
@@ -271,7 +283,7 @@ export function calculateResults(roomCode: string, room: Room): VoteResult | nul
     realAuthorId,
     realAuthorName: realAuthor?.name || 'Unknown',
     votes: { ...state.votes },
-    pointsAwarded,
+    pointsAwarded: {},
     teamPointsAwarded,
   };
 }

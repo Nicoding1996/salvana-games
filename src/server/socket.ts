@@ -78,6 +78,13 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       }
     });
 
+    socket.on('hub:shuffleTeams', () => {
+      const room = RoomManager.shuffleTeams(socket.id);
+      if (room) {
+        io.to(room.code).emit('hub:roomUpdated', room);
+      }
+    });
+
     socket.on('hub:startGame', (gameId) => {
       const room = RoomManager.getRoomByPlayer(socket.id);
       if (!room || room.hostId !== socket.id) return;
@@ -124,38 +131,6 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
             }
           }
         }, 3000);
-      }
-    });
-
-    socket.on('story-thief:askQuestion', (data) => {
-      const room = RoomManager.getRoomByPlayer(socket.id);
-      if (!room) return;
-
-      const question = StoryThief.addQuestion(room.code, socket.id, data.text, room);
-      if (!question) return;
-
-      const playerName = room.players[socket.id]?.name || 'Unknown';
-      io.to(room.code).emit('story-thief:questionAsked', {
-        id: question.id,
-        askedBy: socket.id,
-        askedByName: playerName,
-        text: question.text,
-        answers: [],
-      });
-    });
-
-    socket.on('story-thief:answerQuestion', (data) => {
-      const room = RoomManager.getRoomByPlayer(socket.id);
-      if (!room) return;
-
-      const success = StoryThief.answerQuestion(room.code, data.questionId, socket.id, data.text, room);
-      if (success) {
-        const playerName = room.players[socket.id]?.name || 'Unknown';
-        io.to(room.code).emit('story-thief:questionAnswered', {
-          questionId: data.questionId,
-          answeredBy: playerName,
-          text: data.text,
-        });
       }
     });
 

@@ -14,10 +14,10 @@ export default function ReplacementPhase({ needsReplacement, onSubmit, category 
   if (!needsReplacement) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
-        <div className="text-5xl mb-4">⏳</div>
-        <h2 className="text-xl font-bold mb-2">Waiting...</h2>
-        <p className="text-(--text-secondary) text-center">
-          The author is writing their replacement story
+        <div className="text-4xl mb-4">⏳</div>
+        <h2 className="text-lg font-semibold mb-1">Waiting</h2>
+        <p className="text-(--text-muted) text-sm text-center">
+          The author is writing their next story
         </p>
       </div>
     );
@@ -32,21 +32,17 @@ export default function ReplacementPhase({ needsReplacement, onSubmit, category 
   return (
     <div className="flex-1 flex flex-col p-4 animate-slide-up">
       <div className="text-center mb-4">
-        <h2 className="text-xl font-bold mb-1">Write a New Story</h2>
-        {category && (
-          <p className="text-(--accent) text-sm">💡 Suggestion: {category}</p>
-        )}
-        <p className="text-(--text-secondary) text-xs mt-1">
-          Your story was used! Write a new one to refill the pile.
-        </p>
+        <h2 className="text-lg font-semibold mb-1">✍️ New Story</h2>
+        {category && <p className="text-(--game-accent) text-sm">{category}</p>}
+        <p className="text-(--text-muted) text-xs mt-1">Your story was used — write a new one</p>
       </div>
 
       <div className="flex-1">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Write another true story..."
-          className="w-full h-full min-h-[150px] p-4 bg-(--bg-card) rounded-2xl text-base outline-none focus:ring-2 focus:ring-(--accent) resize-none"
+          placeholder="Another true story..."
+          className="w-full h-full min-h-[140px] p-4 bg-(--bg-card) border border-(--border) rounded-xl text-base outline-none focus:border-(--game-accent) transition-colors resize-none placeholder:text-(--text-muted)"
           autoFocus
         />
       </div>
@@ -55,9 +51,9 @@ export default function ReplacementPhase({ needsReplacement, onSubmit, category 
         <button
           onClick={handleSubmit}
           disabled={!text.trim()}
-          className="w-full py-4 bg-(--accent) hover:bg-[#d63d56] disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl text-lg font-semibold transition-all active:scale-95"
+          className="w-full py-3.5 bg-(--game-accent) text-(--bg-primary) disabled:opacity-30 rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
         >
-          Submit Story
+          Submit
         </button>
       </div>
     </div>

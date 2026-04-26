@@ -19,63 +19,66 @@ export default function QuestionPhase({
   hintCard, timerSeconds, roundMode,
   onEndPhase, isHost,
 }: Props) {
+  const isUrgent = roundMode === 'timed' && timerSeconds !== null && timerSeconds <= 10;
+
   return (
     <div className="flex-1 flex flex-col">
       {/* Timer bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-(--bg-card)">
-        <div className="text-sm">
-          {roundMode === 'timed' && timerSeconds !== null && (
-            <span className={timerSeconds <= 10 ? 'text-(--accent) font-bold text-lg' : 'text-(--text-secondary)'}>
-              ⏱ {timerSeconds}s
-            </span>
-          )}
-          {roundMode === 'freeFlow' && (
-            <span className="text-(--text-secondary)">🌊 Free Flow — ask away!</span>
-          )}
+      {roundMode === 'timed' && timerSeconds !== null && (
+        <div className={`flex items-center justify-center py-3 border-b ${isUrgent ? 'border-(--danger)/30 bg-(--danger-dim)' : 'border-(--border)'}`}>
+          <span className={`font-mono text-lg font-bold ${isUrgent ? 'animate-timer-urgent' : 'text-(--text-secondary)'}`}>
+            {timerSeconds}s
+          </span>
+        </div>
+      )}
+      {roundMode === 'freeFlow' && (
+        <div className="flex items-center justify-center py-2.5 border-b border-(--border)">
+          <span className="text-xs text-(--text-muted)">🌊 Free Flow</span>
+        </div>
+      )}
+
+      {/* Story — prominent, centered */}
+      <div className="px-5 pt-5 pb-3">
+        <div className="story-card rounded-xl p-5">
+          <p className="text-base leading-relaxed text-center">
+            &ldquo;{story}&rdquo;
+          </p>
         </div>
       </div>
 
-      {/* Story card */}
-      <div className="mx-4 mt-4 bg-(--bg-secondary) rounded-2xl p-4 border border-(--accent-secondary)/20">
-        <p className="text-xs text-(--text-secondary) mb-1">📖 The Story</p>
-        <p className="text-base leading-relaxed">&ldquo;{story}&rdquo;</p>
-      </div>
-
-      {/* Role indicator + hint */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6 gap-4">
+      {/* Role + suspects — centered */}
+      <div className="flex-1 flex flex-col items-center justify-center px-5 gap-5">
         {isMyStory && (
-          <div className="bg-(--accent)/20 border border-(--accent) rounded-2xl px-5 py-3 text-center animate-fade-in">
-            <p className="text-(--accent) font-semibold text-lg">🎯 This is YOUR story</p>
-            <p className="text-sm text-(--text-secondary) mt-1">Answer questions truthfully</p>
+          <div className="bg-(--game-accent-dim) border border-(--game-accent)/25 rounded-xl px-5 py-3 text-center animate-fade-in">
+            <p className="text-(--game-accent) font-semibold">🎯 Your story — be truthful</p>
           </div>
         )}
 
         {isOnBluffingTeam && !isMyStory && (
-          <div className="bg-(--accent-secondary)/20 border border-(--accent-secondary) rounded-2xl px-5 py-3 text-center animate-fade-in">
-            <p className="font-semibold text-lg">🎭 Bluff!</p>
-            <p className="text-sm text-(--text-secondary) mt-1">Claim this story is yours</p>
+          <div className="bg-(--game-secondary-dim) border border-(--game-secondary)/25 rounded-xl px-5 py-3 text-center animate-fade-in">
+            <p className="text-(--game-secondary) font-semibold">🎭 Bluff — make it yours</p>
             {hintCard && (
-              <p className="text-xs text-(--accent-secondary) mt-3 italic">💡 {hintCard}</p>
+              <p className="text-xs text-(--text-muted) mt-1.5 italic">💡 {hintCard}</p>
             )}
           </div>
         )}
 
         {!isOnBluffingTeam && (
           <div className="text-center animate-fade-in">
-            <p className="text-5xl mb-3">🔍</p>
-            <p className="font-semibold text-lg">Ask questions out loud!</p>
-            <p className="text-sm text-(--text-secondary) mt-1">
-              Figure out who really wrote this story
-            </p>
+            <p className="text-2xl mb-2">🔍</p>
+            <p className="font-semibold text-base">Ask questions out loud</p>
+            <p className="text-xs text-(--text-muted) mt-1">Who really wrote this?</p>
           </div>
         )}
 
-        {/* Suspects display */}
-        <div className="flex gap-4 flex-wrap justify-center mt-4">
+        {/* Suspects */}
+        <div className="flex gap-5 flex-wrap justify-center">
           {bluffingTeamMembers.map((member) => (
-            <div key={member.id} className="flex flex-col items-center gap-1">
-              <span className="text-3xl">{member.avatar}</span>
-              <span className="text-xs text-(--text-secondary)">{member.name}</span>
+            <div key={member.id} className="flex flex-col items-center gap-1.5">
+              <div className="w-12 h-12 rounded-full bg-(--bg-card) border border-(--border) flex items-center justify-center text-2xl">
+                {member.avatar}
+              </div>
+              <span className="text-[11px] text-(--text-muted)">{member.name}</span>
             </div>
           ))}
         </div>
@@ -86,7 +89,7 @@ export default function QuestionPhase({
         <div className="p-4">
           <button
             onClick={onEndPhase}
-            className="w-full py-4 bg-(--accent) hover:bg-[#d63d56] rounded-2xl text-lg font-semibold transition-all active:scale-95"
+            className="w-full py-3.5 bg-(--game-accent) text-(--bg-primary) rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
           >
             End Questions → Vote
           </button>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { connectSocket, getSocket } from '@/lib/socket/client';
 import type { Room, RoomSettings } from '@/types/hub';
 
@@ -29,7 +29,6 @@ export function useRoom() {
   const [playerId, setPlayerId] = useState<string | null>(_playerId);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(_connected);
-  const initialized = useRef(false);
 
   useEffect(() => {
     // Sync from global state
@@ -130,6 +129,10 @@ export function useRoom() {
     getSocket().emit('hub:startGame', gameId);
   }, []);
 
+  const shuffleTeams = useCallback(() => {
+    getSocket().emit('hub:shuffleTeams');
+  }, []);
+
   const leaveRoom = useCallback(() => {
     getSocket().emit('hub:leaveRoom');
     setGlobalRoom(null);
@@ -155,6 +158,7 @@ export function useRoom() {
     updateSettings,
     assignTeam,
     startGame,
+    shuffleTeams,
     leaveRoom,
     setError,
   };
