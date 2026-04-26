@@ -59,6 +59,7 @@ export default function StoryThiefGame({ room, playerId, isHost }: Props) {
             submittedCount={gameState.submittedPlayers.length}
             totalPlayers={gameState.totalPlayers}
             category={gameState.storyCategory}
+            isFirstRound={gameState.roundNumber === 0}
           />
         )}
 
