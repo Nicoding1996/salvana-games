@@ -16,7 +16,7 @@ export default function QRCode({ value, size = 160 }: Props) {
       width: size,
       margin: 1,
       color: {
-        dark: '#ededf4',
+        dark: '#f0eef5',
         light: '#00000000', // transparent background
       },
       errorCorrectionLevel: 'M',

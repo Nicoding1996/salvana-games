@@ -5,21 +5,21 @@
    ============================================ */
 
 :root {
-  /* Background layers — more contrast between them */
-  --bg-primary: #06060c;
-  --bg-secondary: #0c0c16;
-  --bg-card: #131322;
-  --bg-elevated: #1b1b30;
-  --bg-hover: #22223a;
+  /* Background layers — warm dark, not cold black */
+  --bg-primary: #0a0a10;
+  --bg-secondary: #100f18;
+  --bg-card: #171525;
+  --bg-elevated: #1f1c32;
+  --bg-hover: #28243e;
 
   /* Text hierarchy */
-  --text-primary: #ededf4;
-  --text-secondary: #9494ae;
-  --text-muted: #55556e;
+  --text-primary: #f0eef5;
+  --text-secondary: #9e96b4;
+  --text-muted: #5e5678;
 
-  /* Borders */
-  --border: #1e1e34;
-  --border-light: #2a2a44;
+  /* Borders — slightly warm */
+  --border: #231f38;
+  --border-light: #2e2948;
 
   /* Brand — Salvana Games identity */
   --brand: #f0a050;
@@ -53,11 +53,12 @@ body {
   overscroll-behavior: none;
 }
 
-/* App background — subtle radial gradient for depth */
+/* App background — warm radial gradients for "game night" feel */
 .app-bg {
   background:
-    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(232, 168, 73, 0.04) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 50% at 50% 100%, rgba(155, 123, 223, 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(232, 168, 73, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 50% 110%, rgba(155, 123, 223, 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse 100% 100% at 50% 50%, rgba(22, 18, 35, 0.5) 0%, transparent 70%),
     var(--bg-primary);
 }
 
@@ -74,7 +75,7 @@ input, textarea, select { font-size: 16px !important; }
 
 /* Story card — the centerpiece */
 .story-card {
-  background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(27, 27, 48, 0.8) 100%);
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(31, 28, 50, 0.8) 100%);
   border: 1px solid rgba(232, 168, 73, 0.15);
   position: relative;
   overflow: hidden;
