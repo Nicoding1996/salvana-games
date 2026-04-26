@@ -1,65 +1,141 @@
-import Image from "next/image";
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useRoom } from '@/lib/hub/useRoom';
 
 export default function Home() {
+  const [mode, setMode] = useState<'home' | 'create' | 'join'>('home');
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+  const { createRoom, joinRoom, error, setError } = useRoom();
+
+  const handleCreate = async () => {
+    if (!name.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const room = await createRoom(name.trim());
+      router.push(`/room/${room.code}`);
+    } catch {
+      setLoading(false);
+    }
+  };
+
+  const handleJoin = async () => {
+    if (!name.trim() || !code.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const room = await joinRoom(code.trim(), name.trim());
+      router.push(`/room/${room.code}`);
+    } catch {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="flex-1 flex flex-col items-center justify-center p-6">
+      {/* Logo */}
+      <div className="mb-10 text-center animate-fade-in">
+        <h1 className="text-4xl font-bold mb-2">
+          🎮 <span className="bg-linear-to-r from-[#e94560] to-[#533483] bg-clip-text text-transparent">Social Games</span>
+        </h1>
+        <p className="text-(--text-secondary) text-sm">Party games on your phone</p>
+      </div>
+
+      {mode === 'home' && (
+        <div className="w-full max-w-sm space-y-4 animate-slide-up">
+          <button
+            onClick={() => setMode('create')}
+            className="w-full py-4 px-6 bg-(--accent) hover:bg-[#d63d56] rounded-2xl text-lg font-semibold transition-all active:scale-95"
+            aria-label="Create a new game room"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            Create Room
+          </button>
+          <button
+            onClick={() => setMode('join')}
+            className="w-full py-4 px-6 bg-(--bg-card) hover:bg-(--bg-secondary) border border-(--accent-secondary) rounded-2xl text-lg font-semibold transition-all active:scale-95"
+            aria-label="Join an existing game room"
           >
-            Documentation
-          </a>
+            Join Room
+          </button>
         </div>
-      </main>
+      )}
+
+      {mode === 'create' && (
+        <div className="w-full max-w-sm space-y-4 animate-slide-up">
+          <label htmlFor="create-name" className="block text-sm text-(--text-secondary)">Your Name</label>
+          <input
+            id="create-name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Enter your name"
+            maxLength={20}
+            className="w-full py-4 px-5 bg-(--bg-card) rounded-2xl text-lg outline-none focus:ring-2 focus:ring-(--accent) placeholder:text-(--text-secondary)"
+            autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+          />
+          {error && <p className="text-(--accent) text-sm" role="alert">{error}</p>}
+          <button
+            onClick={handleCreate}
+            disabled={!name.trim() || loading}
+            className="w-full py-4 px-6 bg-(--accent) hover:bg-[#d63d56] disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl text-lg font-semibold transition-all active:scale-95"
+          >
+            {loading ? 'Creating...' : 'Create Room'}
+          </button>
+          <button
+            onClick={() => { setMode('home'); setError(null); }}
+            className="w-full py-3 text-(--text-secondary) text-sm"
+          >
+            ← Back
+          </button>
+        </div>
+      )}
+
+      {mode === 'join' && (
+        <div className="w-full max-w-sm space-y-4 animate-slide-up">
+          <label htmlFor="join-name" className="block text-sm text-(--text-secondary)">Your Name</label>
+          <input
+            id="join-name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Enter your name"
+            maxLength={20}
+            className="w-full py-4 px-5 bg-(--bg-card) rounded-2xl text-lg outline-none focus:ring-2 focus:ring-(--accent) placeholder:text-(--text-secondary)"
+            autoFocus
+          />
+          <label htmlFor="join-code" className="block text-sm text-(--text-secondary)">Room Code</label>
+          <input
+            id="join-code"
+            type="text"
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 4))}
+            placeholder="ABCD"
+            maxLength={4}
+            className="w-full py-4 px-5 bg-(--bg-card) rounded-2xl text-2xl text-center tracking-[0.3em] font-mono outline-none focus:ring-2 focus:ring-(--accent) placeholder:text-(--text-secondary) uppercase"
+            onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+          />
+          {error && <p className="text-(--accent) text-sm" role="alert">{error}</p>}
+          <button
+            onClick={handleJoin}
+            disabled={!name.trim() || code.length !== 4 || loading}
+            className="w-full py-4 px-6 bg-(--accent) hover:bg-[#d63d56] disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl text-lg font-semibold transition-all active:scale-95"
+          >
+            {loading ? 'Joining...' : 'Join Room'}
+          </button>
+          <button
+            onClick={() => { setMode('home'); setError(null); }}
+            className="w-full py-3 text-(--text-secondary) text-sm"
+          >
+            ← Back
+          </button>
+        </div>
+      )}
     </div>
   );
 }
