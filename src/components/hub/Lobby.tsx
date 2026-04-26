@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { useRoom } from '@/lib/hub/useRoom';
 import type { RoundMode } from '@/types/hub';
 import QRCode from '@/components/shared/QRCode';
@@ -12,11 +13,17 @@ interface LobbyProps {
 export default function Lobby({ roomHook }: LobbyProps) {
   const { room, playerId, isHost, updateSettings, assignTeam, shuffleTeams, startGame, leaveRoom } = roomHook;
   const [showQR, setShowQR] = useState(false);
+  const router = useRouter();
   if (!room) return null;
 
   const playerCount = Object.keys(room.players).length;
   const canStart = playerCount >= 4;
   const roomUrl = typeof window !== 'undefined' ? `${window.location.origin}/room/${room.code}` : '';
+
+  const handleLeave = () => {
+    leaveRoom();
+    router.push('/');
+  };
 
   const handleJoinTeam = (teamId: string) => {
     if (!playerId) return;
@@ -201,7 +208,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
         )}
 
         <button
-          onClick={leaveRoom}
+          onClick={handleLeave}
           className="w-full py-2.5 text-(--text-muted) text-xs hover:text-(--text-secondary) transition-colors"
         >
           Leave Room

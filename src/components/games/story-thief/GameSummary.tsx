@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import type { Room } from '@/types/hub';
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function GameSummary({ scores, teamScores, room }: Props) {
+  const router = useRouter();
   const sortedTeams = room.teams
     .map(t => ({ ...t, score: teamScores[t.id] || 0 }))
     .sort((a, b) => b.score - a.score);
@@ -83,13 +85,19 @@ export default function GameSummary({ scores, teamScores, room }: Props) {
         </div>
       )}
 
-      {/* Play Again */}
-      <div className="mt-auto pb-4">
+      {/* Play Again / Leave */}
+      <div className="mt-auto pb-4 space-y-2">
         <button
           onClick={() => window.location.reload()}
           className="w-full py-3.5 bg-(--brand) text-(--bg-primary) rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
         >
           Play Again
+        </button>
+        <button
+          onClick={() => router.push('/')}
+          className="w-full py-2.5 text-(--text-muted) text-xs hover:text-(--text-secondary) transition-colors"
+        >
+          Leave
         </button>
       </div>
     </div>
