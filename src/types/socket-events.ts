@@ -2,8 +2,8 @@
 // Socket Event Types — Typed event maps
 // ============================================
 
-import type { Player, Room, RoomSettings, Team } from './hub';
-import type { StoryThiefState, StoryThiefPhase } from './games/story-thief';
+import type { Player, Room, RoomSettings } from './hub';
+import type { StoryThiefPhase } from './games/story-thief';
 
 // ---- Hub Events: Client → Server ----
 export interface ClientToServerEvents {
@@ -15,6 +15,7 @@ export interface ClientToServerEvents {
   'hub:assignTeam': (data: { playerId: string; teamId: string }) => void;
   'hub:shuffleTeams': () => void;
   'hub:startGame': (gameId: string) => void;
+  'hub:requestState': () => void;
 
   // Story Thief
   'story-thief:submitStory': (data: { text: string }) => void;
@@ -35,7 +36,6 @@ export interface ServerToClientEvents {
 
   // Story Thief
   'story-thief:stateUpdated': (state: StoryThiefClientState) => void;
-  'story-thief:phaseChanged': (phase: StoryThiefPhase) => void;
   'story-thief:timerTick': (secondsLeft: number) => void;
   'story-thief:voteResult': (result: VoteResult) => void;
 }

@@ -35,6 +35,41 @@ function ensureSocketBound() {
   socket.on('connect', () => {
     _connected = true;
     notifyListeners();
+
+    // On reconnect, re-join the room so the server knows who we are
+    // (new socket ID means the server lost track of us)
+    const storedName = typeof window !== 'undefined' ? sessionStorage.getItem('playerName') : null;
+    const storedCode = typeof window !== 'undefined' ? sessionStorage.getItem('roomCode') : null;
+
+    if (storedName && storedCode && _room) {
+      // We were in a room — rejoin to re-register with the server
+      console.log(`[useRoom] Reconnected, re-joining room ${storedCode} as ${storedName}`);
+      socket.emit('hub:joinRoom', { code: storedCode, playerName: storedName }, (res) => {
+        if (res.success && res.room && res.playerId) {
+          setGlobalPlayerId(res.playerId);
+          setGlobalRoom(res.room);
+          console.log(`[useRoom] Re-joined room ${storedCode} successfully`);
+        } else {
+          console.log(`[useRoom] Failed to re-join room: ${res.error}`);
+          // Room might be gone — clear state
+          setGlobalRoom(null);
+          setGlobalPlayerId(null);
+          if (typeof window !== 'undefined') {
+            sessionStorage.removeItem('playerName');
+            sessionStorage.removeItem('roomCode');
+          }
+        }
+      });
+    } else if (storedName && storedCode) {
+      // We have session data but no room state — try to join
+      console.log(`[useRoom] Connected with session data, joining ${storedCode}`);
+      socket.emit('hub:joinRoom', { code: storedCode, playerName: storedName }, (res) => {
+        if (res.success && res.room && res.playerId) {
+          setGlobalPlayerId(res.playerId);
+          setGlobalRoom(res.room);
+        }
+      });
+    }
   });
 
   socket.on('disconnect', () => {
@@ -45,6 +80,15 @@ function ensureSocketBound() {
   socket.on('hub:roomUpdated', (updatedRoom: Room) => {
     setGlobalRoom(updatedRoom);
   });
+
+  // Request fresh state when page becomes visible (even if socket stayed connected)
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && socket.connected) {
+        socket.emit('hub:requestState');
+      }
+    });
+  }
 }
 
 export function useRoom() {
@@ -63,10 +107,9 @@ export function useRoom() {
     };
     _listeners.add(listener);
 
-    // Sync immediately in case state changed while unmounted
+    // Sync immediately
     listener();
 
-    // Listen for errors (these are per-component since they're UI-specific)
     const socket = getSocket();
     const onError = (msg: string) => setError(msg);
     socket.on('hub:error', onError);

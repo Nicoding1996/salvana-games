@@ -20,18 +20,19 @@ export interface Story {
 
 export interface StoryThiefState {
   phase: StoryThiefPhase;
-  storyPiles: Record<string, Story[]>;  // teamId -> stories
+  storyPiles: Record<string, Story[]>;
   currentStory: Story | null;
   bluffingTeamIndex: number;
   roundNumber: number;
-  scores: Record<string, number>;       // playerId -> score
-  teamScores: Record<string, number>;   // teamId -> score
+  scores: Record<string, number>;
+  teamScores: Record<string, number>;
   questions: QuestionEntry[];
-  votes: Record<string, string>;        // voterId -> suspectId
+  votes: Record<string, string>;
   submittedPlayers: Set<string>;
-  needsReplacement: string | null;      // playerId who needs to write
+  needsReplacement: string | null;
   timerEndTime: number | null;
   category: string | null;
+  lastVoteResult: import('@/types/socket-events').VoteResult | null;
 }
 
 export interface QuestionEntry {

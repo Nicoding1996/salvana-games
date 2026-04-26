@@ -50,6 +50,7 @@ export function createGame(room: Room): StoryThiefState {
     needsReplacement: null,
     timerEndTime: null,
     category: randomItem(STORY_CATEGORIES),
+    lastVoteResult: null,
   };
 
   gameStates.set(room.code, state);
@@ -302,13 +303,16 @@ export function calculateResults(roomCode: string, room: Room): VoteResult | nul
   state.phase = 'result';
   state.needsReplacement = realAuthorId;
 
-  return {
+  const voteResult: VoteResult = {
     realAuthorId,
     realAuthorName: realAuthor?.name || 'Unknown',
     votes: { ...state.votes },
     pointsAwarded: {},
     teamPointsAwarded,
   };
+
+  state.lastVoteResult = voteResult;
+  return voteResult;
 }
 
 export function submitReplacement(roomCode: string, playerId: string, text: string, room: Room): StoryThiefState | null {
@@ -386,7 +390,7 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
     scores: { ...state.scores },
     teamScores: { ...state.teamScores },
     roundNumber: state.roundNumber,
-    lastVoteResult: null,
+    lastVoteResult: state.phase === 'result' ? state.lastVoteResult : null,
     timerSeconds: state.timerEndTime ? Math.max(0, Math.ceil((state.timerEndTime - Date.now()) / 1000)) : null,
     storyCategory: state.category,
   };

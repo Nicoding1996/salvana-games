@@ -21,14 +21,20 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
     // ---- Hub Events ----
 
     socket.on('hub:createRoom', (data, callback) => {
-      const { room, player } = RoomManager.createRoom(socket.id, data.playerName);
+      const name = (data.playerName || '').trim().slice(0, 20);
+      if (!name) { callback({ success: false, error: 'Name is required' }); return; }
+      const { room, player } = RoomManager.createRoom(socket.id, name);
       socket.join(room.code);
       callback({ success: true, room, playerId: socket.id });
-      console.log(`[Room] Created ${room.code} by ${data.playerName}`);
+      console.log(`[Room] Created ${room.code} by ${name}`);
     });
 
     socket.on('hub:joinRoom', (data, callback) => {
-      const result = RoomManager.joinRoom(data.code, socket.id, data.playerName);
+      const name = (data.playerName || '').trim().slice(0, 20);
+      const code = (data.code || '').trim().toUpperCase().slice(0, 4);
+      if (!name) { callback({ success: false, error: 'Name is required' }); return; }
+      if (!code) { callback({ success: false, error: 'Room code is required' }); return; }
+      const result = RoomManager.joinRoom(code, socket.id, name);
       if ('error' in result) {
         callback({ success: false, error: result.error });
         return;
@@ -104,13 +110,34 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       }
     });
 
-    // ---- Story Thief Events ----
+    // ---- State Refresh (for mobile wake-up) ----
 
-    socket.on('story-thief:submitStory', (data) => {
+    socket.on('hub:requestState', () => {
       const room = RoomManager.getRoomByPlayer(socket.id);
       if (!room) return;
 
-      const state = StoryThief.submitStory(room.code, socket.id, data.text, room);
+      // Send full room state
+      socket.emit('hub:roomUpdated', room);
+
+      // Send game state if game is active
+      if (room.currentGameId === 'story-thief') {
+        const clientState = StoryThief.getClientState(room.code, socket.id, room);
+        if (clientState) {
+          socket.emit('story-thief:stateUpdated', clientState);
+        }
+      }
+      console.log(`[Socket] State refresh for ${socket.id}`);
+    });
+
+    // ---- Story Thief Events ----
+
+    socket.on('story-thief:submitStory', (data) => {
+      const text = (data.text || '').trim().slice(0, 500);
+      if (!text) return;
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room) return;
+
+      const state = StoryThief.submitStory(room.code, socket.id, text, room);
       if (!state) return;
 
       broadcastGameState(io, room);
@@ -172,6 +199,8 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
     });
 
     socket.on('story-thief:submitReplacement', (data) => {
+      const text = (data.text || '').trim().slice(0, 500);
+      if (!text) return;
       const room = RoomManager.getRoomByPlayer(socket.id);
       if (!room) return;
 
@@ -232,9 +261,11 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       if (room) {
         io.to(room.code).emit('hub:roomUpdated', room);
 
-        // If game is active and we're in voting, check if all remaining votes are in
+        // If game is active, handle phase-specific disconnect logic
         if (room.currentGameId === 'story-thief') {
           const state = StoryThief.getGameState(room.code);
+
+          // Voting: check if all remaining votes are in
           if (state?.phase === 'voting' && StoryThief.allVotesIn(room.code, room)) {
             const result = StoryThief.calculateResults(room.code, room);
             if (result) {
@@ -242,7 +273,14 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
               broadcastGameState(io, room);
             }
           }
-          // If in setup and all remaining connected players submitted, start
+
+          // Result: if the author who needs replacement disconnected, clear the requirement
+          if (state?.phase === 'result' && state.needsReplacement === socket.id) {
+            state.needsReplacement = null;
+            broadcastGameState(io, room);
+          }
+
+          // Setup: if all remaining connected players submitted, start
           if (state?.phase === 'setup' && StoryThief.allPlayersSubmitted(room.code, room)) {
             if (!setupLocks.has(room.code)) {
               setupLocks.add(room.code);

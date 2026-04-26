@@ -50,7 +50,10 @@ function ensureSocketBound() {
     if (state.timerSeconds !== null) {
       _timerSeconds = state.timerSeconds;
     }
-    if (state.phase !== 'result') {
+    // Update lastVoteResult from state (for reconnection) or clear it on phase change
+    if (state.lastVoteResult) {
+      _lastVoteResult = state.lastVoteResult;
+    } else if (state.phase !== 'result') {
       _lastVoteResult = null;
     }
     notifyListeners();

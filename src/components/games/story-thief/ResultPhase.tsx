@@ -26,7 +26,6 @@ export default function ResultPhase({
   teamScores, playerId, roundNumber,
 }: Props) {
   const [replacementText, setReplacementText] = useState('');
-  const [replacementSubmitted, setReplacementSubmitted] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
   useEffect(() => {
@@ -37,9 +36,17 @@ export default function ResultPhase({
   const handleSubmitReplacement = () => {
     if (replacementText.trim()) {
       onSubmitReplacement(replacementText.trim());
-      setReplacementSubmitted(true);
+      // Don't clear text yet — wait for server confirmation (needsReplacement becomes false)
     }
   };
+
+  // Server confirmed replacement was received — clear the text
+  const replacementAccepted = !needsReplacement && replacementText.trim().length > 0;
+  useEffect(() => {
+    if (replacementAccepted) {
+      setReplacementText('');
+    }
+  }, [replacementAccepted]);
 
   if (!voteResult) {
     return (
@@ -168,7 +175,7 @@ export default function ResultPhase({
           </div>
 
           {/* Replacement */}
-          {needsReplacement && !replacementSubmitted && (
+          {needsReplacement && (
             <div className="bg-(--bg-card) border border-(--game-accent)/20 rounded-xl p-3.5 mb-3 animate-slide-up">
               <p className="text-sm font-medium mb-1.5">✍️ Write your next story</p>
               {category && <p className="text-xs text-(--game-accent) mb-2">{category}</p>}
@@ -188,10 +195,6 @@ export default function ResultPhase({
               </button>
             </div>
           )}
-
-          {needsReplacement && replacementSubmitted && (
-            <p className="text-center text-xs text-(--text-muted) mb-3">✓ Story submitted</p>
-          )}
         </>
       )}
 
@@ -207,10 +210,10 @@ export default function ResultPhase({
             )}
             <button
               onClick={onNextRound}
-              disabled={needsReplacement && !replacementSubmitted}
+              disabled={needsReplacement}
               className="w-full py-3.5 bg-(--game-accent) text-(--bg-primary) disabled:opacity-30 rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
             >
-              {needsReplacement && !replacementSubmitted ? '⏳ Waiting for story...' : '▶ Next Round'}
+              {needsReplacement ? '⏳ Waiting for story...' : '▶ Next Round'}
             </button>
             <button onClick={onEndGame} className="w-full py-2 text-(--text-muted) text-xs">
               End Game
