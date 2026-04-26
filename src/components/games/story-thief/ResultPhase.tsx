@@ -26,6 +26,7 @@ export default function ResultPhase({
   teamScores, playerId, roundNumber,
 }: Props) {
   const [replacementText, setReplacementText] = useState('');
+  const [confirmEnd, setConfirmEnd] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
   useEffect(() => {
@@ -215,8 +216,20 @@ export default function ResultPhase({
             >
               {needsReplacement ? '⏳ Waiting for story...' : '▶ Next Round'}
             </button>
-            <button onClick={onEndGame} className="w-full py-2 text-(--text-muted) text-xs">
-              End Game
+            <button
+              onClick={() => {
+                if (confirmEnd) {
+                  onEndGame();
+                } else {
+                  setConfirmEnd(true);
+                  setTimeout(() => setConfirmEnd(false), 3000);
+                }
+              }}
+              className={`w-full py-2 text-xs transition-colors ${
+                confirmEnd ? 'text-(--danger) font-medium' : 'text-(--text-muted)'
+              }`}
+            >
+              {confirmEnd ? 'Tap again to end game' : 'End Game'}
             </button>
           </>
         )}
