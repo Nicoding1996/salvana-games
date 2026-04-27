@@ -25,6 +25,8 @@ const initialState: StoryThiefClientState = {
   lastVoteResult: null,
   timerSeconds: null,
   storyCategory: null,
+  totalStoriesLeft: 0,
+  waitingForReplacement: false,
 };
 
 // Module-level state — survives component remounts

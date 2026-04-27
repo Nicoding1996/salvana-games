@@ -261,9 +261,30 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       const room = RoomManager.getRoomByPlayer(socket.id);
       if (!room) return;
 
-      const state = StoryThief.submitReplacement(room.code, socket.id, data.text, room);
+      // Replacements can be submitted during any phase now
+      const state = StoryThief.submitReplacement(room.code, socket.id, text, room);
       if (state) {
         broadcastStoryThiefState(io, room);
+
+        // If the game was waiting for this replacement to start the next round, auto-start it
+        if (state.currentStory === null && state.phase === 'result') {
+          const started = StoryThief.startRound(room.code, room);
+          if (started) {
+            broadcastStoryThiefState(io, room);
+
+            setTimeout(() => {
+              const currentState = StoryThief.getGameState(room.code);
+              if (currentState?.phase === 'reveal') {
+                StoryThief.moveToQuestioning(room.code, room);
+                broadcastStoryThiefState(io, room);
+
+                if (room.settings.roundMode === 'timed') {
+                  startTimer(io, room);
+                }
+              }
+            }, 3000);
+          }
+        }
       }
     });
 
@@ -277,8 +298,15 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       StoryThief.advanceToNextRound(room.code, room);
       const started = StoryThief.startRound(room.code, room);
       if (!started) {
-        // No stories available — notify
-        io.to(room.code).emit('hub:error', 'No stories available for this team. Game ending.');
+        // Check if we're waiting on a pending replacement for this team
+        if (StoryThief.isWaitingOnReplacement(room.code, room)) {
+          // Don't end the game — broadcast state so players see the waiting state
+          // The floating replacement banner will prompt the author to write
+          broadcastStoryThiefState(io, room);
+          return;
+        }
+        // Truly no stories left — end game gracefully
+        io.to(room.code).emit('hub:error', 'All stories have been used! Game over.');
         StoryThief.endGame(room.code);
         room.phase = 'finished';
         io.to(room.code).emit('hub:roomUpdated', room);
@@ -463,9 +491,9 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
             }
           }
 
-          // Result: if the author who needs replacement disconnected, clear the requirement
-          if (state?.phase === 'result' && state.needsReplacement === socket.id) {
-            state.needsReplacement = null;
+          // Clear pending replacement for disconnected player (any phase)
+          if (state?.pendingReplacements.has(socket.id)) {
+            state.pendingReplacements.delete(socket.id);
             broadcastStoryThiefState(io, room);
           }
 

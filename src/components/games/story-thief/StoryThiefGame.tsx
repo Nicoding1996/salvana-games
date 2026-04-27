@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import type { Room } from '@/types/hub';
 import { useStoryThief } from '@/lib/games/story-thief/useStoryThief';
 import WriteStory from './WriteStory';
@@ -7,8 +8,43 @@ import StoryReveal from './StoryReveal';
 import QuestionPhase from './QuestionPhase';
 import VotingPhase from './VotingPhase';
 import ResultPhase from './ResultPhase';
-import ReplacementPhase from './ReplacementPhase';
 import GameSummary from './GameSummary';
+
+function WaitingForStory({ needsReplacement, isHost, onEndGame }: {
+  needsReplacement: boolean;
+  isHost: boolean;
+  onEndGame: () => void;
+}) {
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
+      <div className="text-4xl mb-4">⏳</div>
+      <h2 className="text-lg font-semibold mb-1">Waiting for story</h2>
+      <p className="text-(--text-muted) text-sm text-center mb-6">
+        {needsReplacement
+          ? 'Write your replacement story below to continue!'
+          : 'A player needs to finish writing their replacement story before the next round can start.'}
+      </p>
+      {isHost && (
+        <button
+          onClick={() => {
+            if (confirmEnd) {
+              onEndGame();
+            } else {
+              setConfirmEnd(true);
+              setTimeout(() => setConfirmEnd(false), 3000);
+            }
+          }}
+          className={`text-xs transition-colors ${
+            confirmEnd ? 'text-(--danger) font-medium' : 'text-(--text-muted)'
+          }`}
+        >
+          {confirmEnd ? 'Tap again to end game' : 'End Game'}
+        </button>
+      )}
+    </div>
+  );
+}
 
 interface Props {
   room: Room;
@@ -28,8 +64,29 @@ export default function StoryThiefGame({ room, playerId, isHost, onLeaveRoom }: 
   const bluffingTeam = room.teams.find(t => t.id === gameState.bluffingTeamId);
   const isInGame = gameState.phase !== 'setup' && gameState.phase !== 'finished';
 
+  // Floating replacement banner state
+  const [replacementText, setReplacementText] = useState('');
+  const [showReplacementForm, setShowReplacementForm] = useState(false);
+
+  // Auto-show the form when player owes a replacement (after leaving result screen, or in waiting state)
+  const owesReplacement = gameState.needsReplacement && (gameState.phase !== 'result' || gameState.waitingForReplacement);
+
+  // Clear text when replacement is accepted by server
+  useEffect(() => {
+    if (!gameState.needsReplacement && replacementText.trim().length > 0) {
+      setReplacementText('');
+      setShowReplacementForm(false);
+    }
+  }, [gameState.needsReplacement, replacementText]);
+
+  const handleSubmitReplacement = () => {
+    if (replacementText.trim()) {
+      storyThief.submitReplacement(replacementText.trim());
+    }
+  };
+
   return (
-    <div className="flex-1 flex flex-col max-w-lg mx-auto w-full">
+    <div className="flex-1 flex flex-col max-w-lg mx-auto w-full relative">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-(--border)">
         <div className="text-xs flex items-center gap-1.5">
@@ -63,6 +120,11 @@ export default function StoryThiefGame({ room, playerId, isHost, onLeaveRoom }: 
             totalPlayers={gameState.totalPlayers}
             category={gameState.storyCategory}
             isFirstRound={gameState.roundNumber === 0}
+            waitingOn={
+              Object.values(room.players)
+                .filter(p => p.connected && !gameState.submittedPlayers.includes(p.id))
+                .map(p => ({ name: p.name, avatar: p.avatar }))
+            }
           />
         )}
 
@@ -102,28 +164,25 @@ export default function StoryThiefGame({ room, playerId, isHost, onLeaveRoom }: 
           />
         )}
 
-        {gameState.phase === 'result' && (
+        {gameState.phase === 'result' && !gameState.waitingForReplacement && (
           <ResultPhase
             voteResult={storyThief.lastVoteResult}
             room={room}
             isHost={isHost}
-            needsReplacement={gameState.needsReplacement}
-            onSubmitReplacement={storyThief.submitReplacement}
             onNextRound={storyThief.nextRound}
             onEndGame={storyThief.endGame}
-            category={gameState.storyCategory}
-            scores={gameState.scores}
             teamScores={gameState.teamScores}
             playerId={playerId}
             roundNumber={gameState.roundNumber}
+            totalStoriesLeft={gameState.totalStoriesLeft}
           />
         )}
 
-        {gameState.phase === 'replacement' && (
-          <ReplacementPhase
+        {gameState.phase === 'result' && gameState.waitingForReplacement && (
+          <WaitingForStory
             needsReplacement={gameState.needsReplacement}
-            onSubmit={storyThief.submitReplacement}
-            category={gameState.storyCategory}
+            isHost={isHost}
+            onEndGame={storyThief.endGame}
           />
         )}
 
@@ -138,6 +197,50 @@ export default function StoryThiefGame({ room, playerId, isHost, onLeaveRoom }: 
           />
         )}
       </div>
+
+      {/* Floating replacement banner — shown during any phase when player owes a story */}
+      {owesReplacement && (
+        <div className="absolute bottom-0 left-0 right-0 p-3 animate-slide-up">
+          {showReplacementForm ? (
+            <div className="bg-(--bg-card) border border-(--game-accent)/30 rounded-xl p-3 shadow-lg">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium">✍️ Write your next story</p>
+                <button
+                  onClick={() => setShowReplacementForm(false)}
+                  className="text-(--text-muted) text-xs px-2 py-1"
+                  aria-label="Minimize"
+                >
+                  ▾
+                </button>
+              </div>
+              {gameState.storyCategory && (
+                <p className="text-xs text-(--game-accent) mb-2">{gameState.storyCategory}</p>
+              )}
+              <textarea
+                value={replacementText}
+                onChange={(e) => setReplacementText(e.target.value)}
+                placeholder="Another true story..."
+                className="w-full min-h-[80px] p-3 bg-(--bg-elevated) border border-(--border) rounded-lg text-sm outline-none focus:border-(--game-accent) transition-colors resize-none mb-2 placeholder:text-(--text-muted)"
+                aria-label="Write your replacement story"
+              />
+              <button
+                onClick={handleSubmitReplacement}
+                disabled={!replacementText.trim()}
+                className="w-full py-2.5 bg-(--game-accent) text-(--bg-primary) rounded-lg font-medium text-sm disabled:opacity-30 transition-all active:scale-[0.97]"
+              >
+                Submit
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowReplacementForm(true)}
+              className="w-full py-3 bg-(--bg-card) border border-(--game-accent)/30 rounded-xl text-sm font-medium text-(--game-accent) shadow-lg transition-all active:scale-[0.98]"
+            >
+              ✍️ Tap to write your next story
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

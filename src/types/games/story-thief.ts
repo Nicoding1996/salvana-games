@@ -8,7 +8,6 @@ export type StoryThiefPhase =
   | 'questioning'    // Teams asking questions
   | 'voting'         // Non-bluffing teams voting
   | 'result'         // Author revealed, points shown
-  | 'replacement'    // Author writing replacement story
   | 'finished';      // Game over
 
 export interface Story {
@@ -29,7 +28,7 @@ export interface StoryThiefState {
   questions: QuestionEntry[];
   votes: Record<string, string>;
   submittedPlayers: Set<string>;
-  needsReplacement: string | null;
+  pendingReplacements: Set<string>;  // players who owe a replacement story
   timerEndTime: number | null;
   category: string | null;
   lastVoteResult: import('@/types/socket-events').VoteResult | null;

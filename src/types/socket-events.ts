@@ -95,4 +95,6 @@ export interface StoryThiefClientState {
   lastVoteResult: VoteResult | null;
   timerSeconds: number | null;
   storyCategory: string | null;
+  totalStoriesLeft: number;
+  waitingForReplacement: boolean;
 }

@@ -9,23 +9,19 @@ interface Props {
   voteResult: VoteResult | null;
   room: Room;
   isHost: boolean;
-  needsReplacement: boolean;
-  onSubmitReplacement: (text: string) => void;
   onNextRound: () => void;
   onEndGame: () => void;
-  category: string | null;
-  scores: Record<string, number>;
   teamScores: Record<string, number>;
   playerId: string;
   roundNumber: number;
+  totalStoriesLeft: number;
 }
 
 export default function ResultPhase({
-  voteResult, room, isHost, needsReplacement,
-  onSubmitReplacement, onNextRound, onEndGame, category,
-  teamScores, playerId, roundNumber,
+  voteResult, room, isHost,
+  onNextRound, onEndGame,
+  teamScores, playerId, roundNumber, totalStoriesLeft,
 }: Props) {
-  const [replacementText, setReplacementText] = useState('');
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
@@ -33,21 +29,6 @@ export default function ResultPhase({
     const timer = setTimeout(() => setShowDetails(true), 3500);
     return () => clearTimeout(timer);
   }, []);
-
-  const handleSubmitReplacement = () => {
-    if (replacementText.trim()) {
-      onSubmitReplacement(replacementText.trim());
-      // Don't clear text yet — wait for server confirmation (needsReplacement becomes false)
-    }
-  };
-
-  // Server confirmed replacement was received — clear the text
-  const replacementAccepted = !needsReplacement && replacementText.trim().length > 0;
-  useEffect(() => {
-    if (replacementAccepted) {
-      setReplacementText('');
-    }
-  }, [replacementAccepted]);
 
   if (!voteResult) {
     return (
@@ -174,28 +155,6 @@ export default function ResultPhase({
               </div>
             ))}
           </div>
-
-          {/* Replacement */}
-          {needsReplacement && (
-            <div className="bg-(--bg-card) border border-(--game-accent)/20 rounded-xl p-3.5 mb-3 animate-slide-up">
-              <p className="text-sm font-medium mb-1.5">✍️ Write your next story</p>
-              {category && <p className="text-xs text-(--game-accent) mb-2">{category}</p>}
-              <textarea
-                value={replacementText}
-                onChange={(e) => setReplacementText(e.target.value)}
-                placeholder="Another true story..."
-                className="w-full min-h-[90px] p-3 bg-(--bg-secondary) border border-(--border) rounded-lg text-sm outline-none focus:border-(--game-accent) transition-colors resize-none mb-2 placeholder:text-(--text-muted)"
-                autoFocus
-              />
-              <button
-                onClick={handleSubmitReplacement}
-                disabled={!replacementText.trim()}
-                className="w-full py-2.5 bg-(--game-accent) text-(--bg-primary) rounded-lg font-medium text-sm disabled:opacity-30 transition-all active:scale-[0.97]"
-              >
-                Submit
-              </button>
-            </div>
-          )}
         </>
       )}
 
@@ -211,10 +170,9 @@ export default function ResultPhase({
             )}
             <button
               onClick={onNextRound}
-              disabled={needsReplacement}
-              className="w-full py-3.5 bg-(--game-accent) text-(--bg-primary) disabled:opacity-30 rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
+              className="w-full py-3.5 bg-(--game-accent) text-(--bg-primary) rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
             >
-              {needsReplacement ? '⏳ Waiting for story...' : '▶ Next Round'}
+              ▶ Next Round
             </button>
             <button
               onClick={() => {

@@ -9,9 +9,10 @@ interface Props {
   totalPlayers: number;
   category: string | null;
   isFirstRound: boolean;
+  waitingOn: { name: string; avatar: string }[];
 }
 
-export default function WriteStory({ onSubmit, hasSubmitted, submittedCount, totalPlayers, category, isFirstRound }: Props) {
+export default function WriteStory({ onSubmit, hasSubmitted, submittedCount, totalPlayers, category, isFirstRound, waitingOn }: Props) {
   const [text, setText] = useState('');
   const [showRules, setShowRules] = useState(isFirstRound);
 
@@ -28,10 +29,23 @@ export default function WriteStory({ onSubmit, hasSubmitted, submittedCount, tot
         <div className="text-4xl mb-4">✓</div>
         <h2 className="text-lg font-semibold mb-1">Story Submitted</h2>
         <p className="text-(--text-muted) text-sm mb-6">Waiting for others...</p>
-        <div className="bg-(--bg-card) border border-(--border) rounded-xl px-5 py-2.5">
+        <div className="bg-(--bg-card) border border-(--border) rounded-xl px-5 py-2.5 mb-5">
           <span className="text-xl font-bold text-(--game-accent)">{submittedCount}</span>
           <span className="text-(--text-muted)"> / {totalPlayers}</span>
         </div>
+        {waitingOn.length > 0 && (
+          <div className="w-full max-w-xs">
+            <p className="text-xs text-(--text-muted) text-center mb-2">Still writing...</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {waitingOn.map((p) => (
+                <span key={p.name} className="inline-flex items-center gap-1 px-2.5 py-1 bg-(--bg-card) border border-(--border) rounded-full text-xs text-(--text-secondary)">
+                  <span>{p.avatar}</span>
+                  <span>{p.name}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }

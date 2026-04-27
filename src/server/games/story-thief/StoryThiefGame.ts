@@ -47,7 +47,7 @@ export function createGame(room: Room): StoryThiefState {
     questions: [],
     votes: {},
     submittedPlayers: new Set(),
-    needsReplacement: null,
+    pendingReplacements: new Set(),
     timerEndTime: null,
     category: randomItem(STORY_CATEGORIES),
     lastVoteResult: null,
@@ -94,9 +94,10 @@ export function swapPlayerId(roomCode: string, oldId: string, newId: string): vo
     }
   }
 
-  // needsReplacement
-  if (state.needsReplacement === oldId) {
-    state.needsReplacement = newId;
+  // pendingReplacements
+  if (state.pendingReplacements.has(oldId)) {
+    state.pendingReplacements.delete(oldId);
+    state.pendingReplacements.add(newId);
   }
 
   // currentStory author
@@ -129,11 +130,11 @@ export function submitStory(roomCode: string, playerId: string, text: string, ro
   const player = room.players[playerId];
   if (!player || !player.teamId) return null;
 
-  // Replacement story — only the player who needs to replace can submit
-  if (state.phase === 'result' && state.needsReplacement === playerId) {
+  // Pending replacement — can be submitted during any phase
+  if (state.pendingReplacements.has(playerId)) {
     const story: Story = { id: generateId(), text, authorId: playerId, used: false };
     state.storyPiles[player.teamId].push(story);
-    state.needsReplacement = null;
+    state.pendingReplacements.delete(playerId);
     return state;
   }
 
@@ -170,6 +171,14 @@ export function startRound(roomCode: string, room: Room): StoryThiefState | null
 
   if (availableStories.length === 0) return null;
 
+  // Every connected player on the bluffing team must have an unused story in the pile.
+  // Otherwise the other team can deduce who didn't write — ruins the bluffing.
+  const connectedBluffers = bluffingTeam.playerIds.filter(pid => room.players[pid]?.connected);
+  for (const pid of connectedBluffers) {
+    const hasStory = availableStories.some(s => s.authorId === pid);
+    if (!hasStory) return null;
+  }
+
   const story = randomItem(availableStories);
   story.used = true;
 
@@ -181,6 +190,35 @@ export function startRound(roomCode: string, room: Room): StoryThiefState | null
   state.category = randomItem(STORY_CATEGORIES);
 
   return state;
+}
+
+/**
+ * Check if the bluffing team can't start because a player owes a replacement.
+ * Returns true if any connected bluffing team member is missing a story but has a pending replacement.
+ */
+export function isWaitingOnReplacement(roomCode: string, room: Room): boolean {
+  const state = gameStates.get(roomCode);
+  if (!state) return false;
+
+  const bluffingTeam = room.teams[state.bluffingTeamIndex];
+  const pile = state.storyPiles[bluffingTeam.id];
+  const availableStories = pile.filter(s => !s.used);
+
+  const connectedBluffers = bluffingTeam.playerIds.filter(pid => room.players[pid]?.connected);
+
+  for (const pid of connectedBluffers) {
+    const hasStory = availableStories.some(s => s.authorId === pid);
+    if (!hasStory) {
+      // This player is missing a story — are they writing one?
+      if (state.pendingReplacements.has(pid)) {
+        return true; // Yes, waiting on them
+      }
+      // No pending replacement and no story — this is a permanent gap (e.g. disconnect cleared it)
+      // Don't return true — let it fall through to the "truly no stories" end-game path
+    }
+  }
+
+  return false;
 }
 
 export function moveToQuestioning(roomCode: string, room: Room): StoryThiefState | null {
@@ -301,7 +339,7 @@ export function calculateResults(roomCode: string, room: Room): VoteResult | nul
   }
 
   state.phase = 'result';
-  state.needsReplacement = realAuthorId;
+  state.pendingReplacements.add(realAuthorId);
 
   const voteResult: VoteResult = {
     realAuthorId,
@@ -317,15 +355,15 @@ export function calculateResults(roomCode: string, room: Room): VoteResult | nul
 
 export function submitReplacement(roomCode: string, playerId: string, text: string, room: Room): StoryThiefState | null {
   const state = gameStates.get(roomCode);
-  if (!state || state.phase !== 'result') return null;
-  if (state.needsReplacement !== playerId) return null;
+  if (!state) return null;
+  if (!state.pendingReplacements.has(playerId)) return null;
 
   const player = room.players[playerId];
   if (!player || !player.teamId) return null;
 
   const story: Story = { id: generateId(), text, authorId: playerId, used: false };
   state.storyPiles[player.teamId].push(story);
-  state.needsReplacement = null;
+  state.pendingReplacements.delete(playerId);
 
   return state;
 }
@@ -338,7 +376,6 @@ export function advanceToNextRound(roomCode: string, room: Room): StoryThiefStat
   state.currentStory = null;
   state.questions = [];
   state.votes = {};
-  state.needsReplacement = null;
 
   return state;
 }
@@ -384,7 +421,7 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
     votes: state.phase === 'result' ? state.votes : {},
     hasVoted: !!state.votes[playerId],
     hasSubmittedStory: state.submittedPlayers.has(playerId),
-    needsReplacement: state.needsReplacement === playerId,
+    needsReplacement: state.pendingReplacements.has(playerId),
     submittedPlayers: Array.from(state.submittedPlayers),
     totalPlayers: Object.values(room.players).filter(p => p.connected).length,
     scores: { ...state.scores },
@@ -393,6 +430,9 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
     lastVoteResult: state.phase === 'result' ? state.lastVoteResult : null,
     timerSeconds: state.timerEndTime ? Math.max(0, Math.ceil((state.timerEndTime - Date.now()) / 1000)) : null,
     storyCategory: state.category,
+    totalStoriesLeft: Object.values(state.storyPiles)
+      .reduce((sum, pile) => sum + pile.filter(s => !s.used).length, 0),
+    waitingForReplacement: state.phase === 'result' && state.currentStory === null,
   };
 }
 
