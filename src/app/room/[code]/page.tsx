@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useRoom } from '@/lib/hub/useRoom';
 import Lobby from '@/components/hub/Lobby';
 import StoryThiefGame from '@/components/games/story-thief/StoryThiefGame';
+import LiarsDiceGame from '@/components/games/liars-dice/LiarsDiceGame';
 
 export default function RoomPage() {
   const params = useParams();
@@ -122,8 +123,10 @@ export default function RoomPage() {
         </div>
       )}
 
-      {room.phase === 'playing' || (room.phase === 'finished' && room.currentGameId === 'story-thief') ? (
-        <StoryThiefGame room={room} playerId={playerId!} isHost={roomHook.isHost} />
+      {(room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'story-thief' ? (
+        <StoryThiefGame room={room} playerId={playerId!} isHost={roomHook.isHost} onLeaveRoom={roomHook.leaveRoom} />
+      ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'liars-dice' ? (
+        <LiarsDiceGame roomHook={roomHook} />
       ) : (
         <Lobby roomHook={roomHook} />
       )}

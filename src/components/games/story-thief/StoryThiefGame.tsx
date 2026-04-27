@@ -14,9 +14,10 @@ interface Props {
   room: Room;
   playerId: string;
   isHost: boolean;
+  onLeaveRoom: () => void;
 }
 
-export default function StoryThiefGame({ room, playerId, isHost }: Props) {
+export default function StoryThiefGame({ room, playerId, isHost, onLeaveRoom }: Props) {
   const storyThief = useStoryThief();
   const { gameState } = storyThief;
 
@@ -126,6 +127,9 @@ export default function StoryThiefGame({ room, playerId, isHost }: Props) {
             scores={gameState.scores}
             teamScores={gameState.teamScores}
             room={room}
+            isHost={isHost}
+            onBackToLobby={storyThief.endGame}
+            onLeaveRoom={onLeaveRoom}
           />
         )}
       </div>

@@ -1,16 +1,17 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import type { Room } from '@/types/hub';
 
 interface Props {
   scores: Record<string, number>;
   teamScores: Record<string, number>;
   room: Room;
+  isHost: boolean;
+  onBackToLobby: () => void;
+  onLeaveRoom: () => void;
 }
 
-export default function GameSummary({ scores, teamScores, room }: Props) {
-  const router = useRouter();
+export default function GameSummary({ scores, teamScores, room, isHost, onBackToLobby, onLeaveRoom }: Props) {
   const sortedTeams = room.teams
     .map(t => ({ ...t, score: teamScores[t.id] || 0 }))
     .sort((a, b) => b.score - a.score);
@@ -87,17 +88,23 @@ export default function GameSummary({ scores, teamScores, room }: Props) {
 
       {/* Play Again / Leave */}
       <div className="mt-auto pb-4 space-y-2">
+        {isHost ? (
+          <button
+            onClick={onBackToLobby}
+            className="w-full py-3.5 bg-(--brand) text-(--bg-primary) rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
+          >
+            🏠 Back to Lobby
+          </button>
+        ) : (
+          <p className="text-sm text-(--text-muted) animate-soft-pulse text-center">
+            Waiting for host...
+          </p>
+        )}
         <button
-          onClick={() => window.location.reload()}
-          className="w-full py-3.5 bg-(--brand) text-(--bg-primary) rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
-        >
-          Play Again
-        </button>
-        <button
-          onClick={() => router.push('/')}
+          onClick={onLeaveRoom}
           className="w-full py-2.5 text-(--text-muted) text-xs hover:text-(--text-secondary) transition-colors"
         >
-          Leave
+          Leave Room
         </button>
       </div>
     </div>

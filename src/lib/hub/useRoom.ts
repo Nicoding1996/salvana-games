@@ -170,8 +170,8 @@ export function useRoom() {
     getSocket().emit('hub:assignTeam', { playerId: targetPlayerId, teamId });
   }, []);
 
-  const startGame = useCallback((gameId: string) => {
-    getSocket().emit('hub:startGame', gameId);
+  const startGame = useCallback((gameId: string, gameSettings?: Partial<import('@/types/games/liars-dice').LiarsDiceSettings>) => {
+    getSocket().emit('hub:startGame', gameId, gameSettings);
   }, []);
 
   const shuffleTeams = useCallback(() => {

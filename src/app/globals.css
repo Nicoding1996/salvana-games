@@ -203,3 +203,82 @@ input, textarea, select { font-size: 16px !important; }
   border-radius: 2px;
   animation: confettiDrop 1.8s ease-in forwards;
 }
+
+/* ============================================
+   Liar's Dice — Per-Game Theme Override
+   ============================================ */
+
+[data-game="liars-dice"] {
+  --game-accent: #e74c3c;
+  --game-accent-dim: rgba(231, 76, 60, 0.10);
+  --game-accent-strong: #c0392b;
+  --game-secondary: #f39c12;
+  --game-secondary-dim: rgba(243, 156, 18, 0.10);
+}
+
+/* Dice card — similar to story-card but red/orange accent */
+.dice-card {
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(31, 28, 50, 0.8) 100%);
+  border: 1px solid rgba(231, 76, 60, 0.15);
+  position: relative;
+  overflow: hidden;
+}
+
+.dice-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--game-accent), transparent);
+  opacity: 0.5;
+}
+
+/* ============================================
+   Liar's Dice — Animations
+   ============================================ */
+
+@keyframes diceRoll {
+  0% { transform: rotate(0deg) scale(1); }
+  15% { transform: rotate(-12deg) scale(0.95) translateX(-4px); }
+  30% { transform: rotate(10deg) scale(1.05) translateX(4px); }
+  45% { transform: rotate(-8deg) scale(0.98) translateX(-2px); }
+  60% { transform: rotate(6deg) scale(1.02) translateX(2px); }
+  75% { transform: rotate(-3deg) scale(1); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+@keyframes diceReveal {
+  0% { transform: rotateY(180deg) scale(0.8); opacity: 0; }
+  60% { transform: rotateY(0deg) scale(1.05); opacity: 1; }
+  100% { transform: rotateY(0deg) scale(1); opacity: 1; }
+}
+
+@keyframes lifeLost {
+  0% { transform: scale(1); opacity: 1; }
+  30% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.8); opacity: 0.5; }
+}
+
+@keyframes elimination {
+  0% { filter: grayscale(0); transform: translateY(0); opacity: 1; }
+  100% { filter: grayscale(1); transform: translateY(8px); opacity: 0.4; }
+}
+
+.animate-dice-roll { animation: diceRoll 1.2s ease-in-out; }
+.animate-dice-reveal { animation: diceReveal 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
+.animate-life-lost { animation: lifeLost 0.6s ease-out forwards; }
+.animate-elimination { animation: elimination 0.8s ease-out forwards; }
+
+/* Scrollbar styling for bid history */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}

@@ -4,6 +4,7 @@
 
 import type { Player, Room, RoomSettings } from './hub';
 import type { StoryThiefPhase } from './games/story-thief';
+import type { LiarsDiceClientState, ChallengeResult as LiarsDiceChallengeResult, LiarsDiceSettings } from './games/liars-dice';
 
 // ---- Hub Events: Client → Server ----
 export interface ClientToServerEvents {
@@ -14,7 +15,7 @@ export interface ClientToServerEvents {
   'hub:updateSettings': (settings: Partial<RoomSettings>) => void;
   'hub:assignTeam': (data: { playerId: string; teamId: string }) => void;
   'hub:shuffleTeams': () => void;
-  'hub:startGame': (gameId: string) => void;
+  'hub:startGame': (gameId: string, gameSettings?: Partial<LiarsDiceSettings>) => void;
   'hub:requestState': () => void;
 
   // Story Thief
@@ -24,6 +25,15 @@ export interface ClientToServerEvents {
   'story-thief:submitReplacement': (data: { text: string }) => void;
   'story-thief:nextRound': () => void;
   'story-thief:endGame': () => void;
+
+  // Liar's Dice
+  'liars-dice:rollComplete': () => void;
+  'liars-dice:placeBid': (data: { quantity: number; faceValue: number }) => void;
+  'liars-dice:callLiar': () => void;
+  'liars-dice:callSpotOn': () => void;
+  'liars-dice:nextRound': () => void;
+  'liars-dice:endGame': () => void;
+  'liars-dice:rematch': () => void;
 }
 
 // ---- Hub Events: Server → Client ----
@@ -38,6 +48,12 @@ export interface ServerToClientEvents {
   'story-thief:stateUpdated': (state: StoryThiefClientState) => void;
   'story-thief:timerTick': (secondsLeft: number) => void;
   'story-thief:voteResult': (result: VoteResult) => void;
+
+  // Liar's Dice
+  'liars-dice:stateUpdated': (state: LiarsDiceClientState) => void;
+  'liars-dice:diceRolled': (dice: number[]) => void;
+  'liars-dice:turnTimer': (secondsLeft: number) => void;
+  'liars-dice:challengeResult': (result: LiarsDiceChallengeResult) => void;
 }
 
 // ---- Derived types for client state ----
