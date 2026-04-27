@@ -34,17 +34,20 @@ export default function BidPicker({
   useEffect(() => {
     if (currentBid) {
       if (currentBid.faceValue < 6) {
+        // Same quantity, next face value up
         setQuantity(currentBid.quantity);
         setFaceValue(currentBid.faceValue + 1);
       } else {
-        setQuantity(currentBid.quantity + 1);
+        // Face is 6 (max) — must increase quantity
+        const nextQ = Math.min(currentBid.quantity + 1, totalDiceOnTable);
+        setQuantity(nextQ);
         setFaceValue(1);
       }
     } else {
       setQuantity(1);
       setFaceValue(1);
     }
-  }, [currentBid?.quantity, currentBid?.faceValue]);
+  }, [currentBid?.quantity, currentBid?.faceValue, totalDiceOnTable]);
 
   const isValidBid = () => {
     if (!currentBid) return quantity >= 1 && faceValue >= 1 && faceValue <= 6;
