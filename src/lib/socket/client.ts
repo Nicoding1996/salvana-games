@@ -56,6 +56,16 @@ export function connectSocket(): TypedSocket {
         socket.connect();
       }
     });
+
+    // Use pagehide for faster disconnect detection when user closes tab/navigates away.
+    // pagehide is more reliable than beforeunload on mobile browsers.
+    window.addEventListener('pagehide', () => {
+      if (socket?.connected) {
+        // Send a transport-level close so the server detects disconnect immediately
+        // instead of waiting for pingTimeout (5s)
+        socket.disconnect();
+      }
+    });
   }
 
   return s;

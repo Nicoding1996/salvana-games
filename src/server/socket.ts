@@ -10,6 +10,8 @@ import * as LiarsDice from './games/liars-dice/LiarsDiceGame';
 const setupLocks = new Set<string>();
 // Grace period timers for disconnected players in Liar's Dice
 const disconnectGraceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+// Zombie cleanup interval reference
+let zombieCleanupInterval: ReturnType<typeof setInterval> | null = null;
 
 export function initSocket(httpServer: HTTPServer): SocketIOServer {
   const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents>(httpServer, {
@@ -524,6 +526,28 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       console.log(`[Socket] Disconnected: ${socket.id}`);
     });
   });
+
+  // ---- Zombie Player Cleanup (every 60s) ----
+  // Remove players who disconnected 5+ minutes ago and never came back.
+  // This frees up player slots and keeps lobbies clean.
+  if (zombieCleanupInterval) clearInterval(zombieCleanupInterval);
+  zombieCleanupInterval = setInterval(() => {
+    const zombies = RoomManager.getZombiePlayers();
+    for (const socketId of zombies) {
+      // Clear any Liar's Dice grace timers for this zombie
+      for (const [key, timer] of disconnectGraceTimers) {
+        if (key.endsWith(`:${socketId}`)) {
+          clearTimeout(timer);
+          disconnectGraceTimers.delete(key);
+        }
+      }
+
+      const result = RoomManager.removeDisconnectedPlayer(socketId);
+      if (result) {
+        io.to(result.roomCode).emit('hub:roomUpdated', result.room);
+      }
+    }
+  }, 60 * 1000);
 
   return io;
 }

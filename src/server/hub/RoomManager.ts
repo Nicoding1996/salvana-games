@@ -3,6 +3,10 @@ import { DEFAULT_SETTINGS, TEAM_CONFIGS, AVATARS } from '@/types/hub';
 
 const rooms = new Map<string, Room>();
 const playerRoomMap = new Map<string, string>(); // socketId -> roomCode
+// Track when each player disconnected (socketId -> timestamp)
+const disconnectTimestamps = new Map<string, number>();
+// How long to keep disconnected players before auto-removing (5 minutes)
+const DISCONNECT_CLEANUP_MS = 5 * 60 * 1000;
 
 function generateCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -77,6 +81,10 @@ export function joinRoom(code: string, socketId: string, playerName: string): { 
   if (existingPlayer) {
     // Reconnect: swap old socket ID for new one
     const oldId = existingPlayer.id;
+
+    // Clear disconnect timestamp since they're back
+    disconnectTimestamps.delete(oldId);
+
     delete room.players[oldId];
     playerRoomMap.delete(oldId);
 
@@ -106,6 +114,12 @@ export function joinRoom(code: string, socketId: string, playerName: string): { 
   // New player joining
   if (room.phase !== 'lobby') return { error: 'Game already in progress' };
   if (Object.keys(room.players).length >= room.settings.maxPlayers) return { error: 'Room is full' };
+
+  // Reject duplicate names — prevents session hijacking on reconnect
+  const nameConflict = Object.values(room.players).find(
+    p => p.name === playerName && p.connected
+  );
+  if (nameConflict) return { error: 'Name already taken in this room' };
 
   const player: Player = {
     id: socketId,
@@ -145,6 +159,7 @@ export function leaveRoom(socketId: string): { room: Room; wasHost: boolean } | 
 
   delete room.players[socketId];
   playerRoomMap.delete(socketId);
+  disconnectTimestamps.delete(socketId); // Clean up in case they were marked disconnected
 
   // Transfer host
   if (wasHost) {
@@ -165,6 +180,10 @@ export function leaveRoom(socketId: string): { room: Room; wasHost: boolean } | 
 /**
  * Mark a player as disconnected (don't remove them — they might reconnect).
  * If the host disconnects, transfer host to another connected player.
+ * 
+ * Race condition guard: if the player already reconnected with a new socket ID
+ * (old disconnect event arriving late), the old socket ID won't be in the room
+ * anymore, so we safely return null.
  */
 export function markDisconnected(socketId: string): Room | null {
   const code = playerRoomMap.get(socketId);
@@ -174,21 +193,29 @@ export function markDisconnected(socketId: string): Room | null {
   if (!room) return null;
 
   const player = room.players[socketId];
-  if (player) {
-    player.connected = false;
+  if (!player) return null; // Player already swapped out (reconnected with new ID)
 
-    // Transfer host if the disconnected player was host
-    if (room.hostId === socketId) {
-      const connectedPlayers = Object.values(room.players).filter(p => p.connected);
-      if (connectedPlayers.length > 0) {
-        // Old host loses host status
-        player.isHost = false;
-        // New host
-        const newHost = connectedPlayers[0];
-        room.hostId = newHost.id;
-        newHost.isHost = true;
-        console.log(`[Room] Host transferred from ${player.name} to ${newHost.name} in ${room.code}`);
-      }
+  // Race condition guard: if the player is already marked connected under this ID,
+  // but another socket with the same name is also connected, skip — they reconnected
+  // and this is a stale disconnect from the old socket.
+  if (!player.connected) return null; // Already marked disconnected
+
+  player.connected = false;
+
+  // Record disconnect timestamp for zombie cleanup
+  disconnectTimestamps.set(socketId, Date.now());
+
+  // Transfer host if the disconnected player was host
+  if (room.hostId === socketId) {
+    const connectedPlayers = Object.values(room.players).filter(p => p.connected);
+    if (connectedPlayers.length > 0) {
+      // Old host loses host status
+      player.isHost = false;
+      // New host
+      const newHost = connectedPlayers[0];
+      room.hostId = newHost.id;
+      newHost.isHost = true;
+      console.log(`[Room] Host transferred from ${player.name} to ${newHost.name} in ${room.code}`);
     }
   }
 
@@ -312,16 +339,82 @@ function autoAssignTeam(room: Room, playerId: string): void {
   room.players[playerId].teamId = smallest.id;
 }
 
+/**
+ * Remove a disconnected player from a room entirely.
+ * Used by zombie cleanup to free up player slots.
+ * Returns the room code and player info for game-state cleanup.
+ */
+export function removeDisconnectedPlayer(socketId: string): { roomCode: string; room: Room; player: Player } | null {
+  const code = playerRoomMap.get(socketId);
+  if (!code) return null;
+
+  const room = rooms.get(code);
+  if (!room) return null;
+
+  const player = room.players[socketId];
+  if (!player || player.connected) return null; // Don't remove connected players
+
+  // Remove from team
+  if (player.teamId) {
+    const team = room.teams.find(t => t.id === player.teamId);
+    if (team) {
+      team.playerIds = team.playerIds.filter(id => id !== socketId);
+    }
+  }
+
+  delete room.players[socketId];
+  playerRoomMap.delete(socketId);
+  disconnectTimestamps.delete(socketId);
+
+  // If this was somehow still the host (shouldn't happen, but defensive), transfer
+  if (room.hostId === socketId) {
+    const remaining = Object.values(room.players).filter(p => p.connected);
+    if (remaining.length > 0) {
+      room.hostId = remaining[0].id;
+      remaining[0].isHost = true;
+    } else {
+      // Check if there are any players at all (even disconnected)
+      const anyPlayers = Object.keys(room.players);
+      if (anyPlayers.length === 0) {
+        rooms.delete(code);
+        return null;
+      }
+    }
+  }
+
+  room.lastActivity = Date.now();
+  console.log(`[Room] Zombie cleanup: removed ${player.name} from ${code}`);
+  return { roomCode: code, room, player };
+}
+
+/**
+ * Get all disconnected players that have exceeded the cleanup timeout.
+ * Returns socket IDs that should be removed.
+ */
+export function getZombiePlayers(): string[] {
+  const now = Date.now();
+  const zombies: string[] = [];
+  for (const [socketId, timestamp] of disconnectTimestamps) {
+    if (now - timestamp > DISCONNECT_CLEANUP_MS) {
+      zombies.push(socketId);
+    }
+  }
+  return zombies;
+}
+
 // Cleanup stale rooms every 10 minutes
 setInterval(() => {
   const now = Date.now();
   const TWO_HOURS = 2 * 60 * 60 * 1000;
   for (const [code, room] of rooms) {
     if (now - room.lastActivity > TWO_HOURS) {
+      // Clean up all player references
       for (const pid of Object.keys(room.players)) {
         playerRoomMap.delete(pid);
+        disconnectTimestamps.delete(pid);
       }
       rooms.delete(code);
+      console.log(`[Room] Stale room cleanup: deleted ${code}`);
     }
   }
 }, 10 * 60 * 1000);
