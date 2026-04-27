@@ -109,12 +109,22 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       }
     });
 
+    socket.on('hub:selectGame', (gameId) => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.hostId !== socket.id) return;
+      if (room.phase !== 'lobby') return;
+      room.selectedGameId = gameId;
+      room.lastActivity = Date.now();
+      io.to(room.code).emit('hub:roomUpdated', room);
+    });
+
     socket.on('hub:startGame', (gameId, gameSettings) => {
       const room = RoomManager.getRoomByPlayer(socket.id);
       if (!room || room.hostId !== socket.id) return;
 
       if (gameId === 'story-thief') {
         room.currentGameId = 'story-thief';
+        room.selectedGameId = 'story-thief';
         room.phase = 'playing';
         StoryThief.createGame(room);
 
@@ -125,6 +135,7 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
 
       if (gameId === 'liars-dice') {
         room.currentGameId = 'liars-dice';
+        room.selectedGameId = 'liars-dice';
         room.phase = 'playing';
         LiarsDice.createGame(room, gameSettings);
 
@@ -298,6 +309,7 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         StoryThief.endGame(room.code);
         room.phase = 'lobby';
         room.currentGameId = null;
+        // Keep selectedGameId so lobby remembers the last game played
         io.to(room.code).emit('hub:roomUpdated', room);
         return;
       }
@@ -395,6 +407,7 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       LiarsDice.endGame(room.code);
       room.phase = 'lobby';
       room.currentGameId = null;
+      // Keep selectedGameId so lobby remembers the last game played
       io.to(room.code).emit('hub:roomUpdated', room);
     });
 

@@ -34,6 +34,7 @@ export interface Room {
   teams: Team[];
   settings: RoomSettings;
   currentGameId: string | null;
+  selectedGameId: string | null;  // host's game selection in lobby (before starting)
   phase: RoomPhase;
   createdAt: number;
   lastActivity: number;

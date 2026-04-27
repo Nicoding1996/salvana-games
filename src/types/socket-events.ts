@@ -15,6 +15,7 @@ export interface ClientToServerEvents {
   'hub:updateSettings': (settings: Partial<RoomSettings>) => void;
   'hub:assignTeam': (data: { playerId: string; teamId: string }) => void;
   'hub:shuffleTeams': () => void;
+  'hub:selectGame': (gameId: string) => void;
   'hub:startGame': (gameId: string, gameSettings?: Partial<LiarsDiceSettings>) => void;
   'hub:requestState': () => void;
 

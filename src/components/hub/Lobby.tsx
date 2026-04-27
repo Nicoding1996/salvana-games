@@ -18,13 +18,14 @@ const GAMES = [
 ] as const;
 
 export default function Lobby({ roomHook }: LobbyProps) {
-  const { room, playerId, isHost, updateSettings, assignTeam, shuffleTeams, startGame, leaveRoom } = roomHook;
+  const { room, playerId, isHost, updateSettings, assignTeam, shuffleTeams, startGame, selectGame, leaveRoom } = roomHook;
   const [showQR, setShowQR] = useState(false);
-  const [selectedGame, setSelectedGame] = useState<string>('story-thief');
   const [diceSettings, setDiceSettings] = useState<LiarsDiceSettings>({ ...DEFAULT_LIARS_DICE_SETTINGS });
   const router = useRouter();
   if (!room) return null;
 
+  // Use server-synced selectedGameId so all players see the same view
+  const selectedGame = room.selectedGameId || 'story-thief';
   const playerCount = Object.keys(room.players).length;
   const selectedGameDef = GAMES.find(g => g.id === selectedGame)!;
   const isLiarsDice = selectedGame === 'liars-dice';
@@ -85,7 +86,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
           {GAMES.map((game) => (
             <button
               key={game.id}
-              onClick={() => setSelectedGame(game.id)}
+              onClick={() => selectGame(game.id)}
               className={`flex-1 py-3 px-3 rounded-xl text-center transition-all active:scale-[0.97] ${
                 selectedGame === game.id
                   ? 'bg-(--bg-elevated) ring-2 ring-(--brand) border border-(--brand)/30'
@@ -100,10 +101,12 @@ export default function Lobby({ roomHook }: LobbyProps) {
         </div>
       )}
 
-      {/* Non-host game indicator */}
+      {/* Non-host: show which game is selected */}
       {!isHost && (
         <div className="text-center mb-4">
-          <p className="text-xs text-(--text-muted)">Host is choosing the game...</p>
+          <p className="text-xs text-(--text-muted)">
+            {selectedGameDef.icon} {selectedGameDef.name}
+          </p>
         </div>
       )}
 

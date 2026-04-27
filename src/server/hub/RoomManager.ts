@@ -36,6 +36,7 @@ export function createRoom(hostSocketId: string, playerName: string): { room: Ro
     teams,
     settings: { ...DEFAULT_SETTINGS },
     currentGameId: null,
+    selectedGameId: 'story-thief',
     phase: 'lobby',
     createdAt: Date.now(),
     lastActivity: Date.now(),

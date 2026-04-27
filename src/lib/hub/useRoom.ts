@@ -174,6 +174,10 @@ export function useRoom() {
     getSocket().emit('hub:startGame', gameId, gameSettings);
   }, []);
 
+  const selectGame = useCallback((gameId: string) => {
+    getSocket().emit('hub:selectGame', gameId);
+  }, []);
+
   const shuffleTeams = useCallback(() => {
     getSocket().emit('hub:shuffleTeams');
   }, []);
@@ -203,6 +207,7 @@ export function useRoom() {
     updateSettings,
     assignTeam,
     startGame,
+    selectGame,
     shuffleTeams,
     leaveRoom,
     setError,
