@@ -8,9 +8,10 @@ interface Props {
   isOnBluffingTeam: boolean;
   hasVoted: boolean;
   onVote: (suspectId: string) => void;
+  teamColor?: string;
 }
 
-export default function VotingPhase({ story, bluffingTeamMembers, isOnBluffingTeam, hasVoted, onVote }: Props) {
+export default function VotingPhase({ story, bluffingTeamMembers, isOnBluffingTeam, hasVoted, onVote, teamColor }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
 
   const handleVote = () => {
@@ -46,7 +47,22 @@ export default function VotingPhase({ story, bluffingTeamMembers, isOnBluffingTe
   return (
     <div className="flex-1 flex flex-col p-4 animate-slide-up">
       {/* Story reminder */}
-      <div className="bg-(--bg-card) border border-(--border) rounded-xl p-3 mb-4">
+      <div
+        className="rounded-xl p-3 mb-4 relative overflow-hidden"
+        style={{
+          background: 'var(--bg-card)',
+          border: `1px solid ${teamColor ? teamColor + '20' : 'var(--border)'}`,
+        }}
+      >
+        <div
+          className="absolute top-0 left-0 right-0 h-[1.5px]"
+          style={{
+            background: teamColor
+              ? `linear-gradient(90deg, transparent, ${teamColor}, transparent)`
+              : 'none',
+            opacity: 0.4,
+          }}
+        />
         <p className="text-xs text-(--text-muted) mb-1">📜 The story was:</p>
         <p className="text-sm leading-relaxed">&ldquo;{story}&rdquo;</p>
       </div>

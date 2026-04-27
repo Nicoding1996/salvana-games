@@ -12,12 +12,13 @@ interface Props {
   roundMode: RoundMode;
   onEndPhase: () => void;
   isHost: boolean;
+  teamColor?: string;
 }
 
 export default function QuestionPhase({
   story, bluffingTeamMembers, isOnBluffingTeam, isMyStory,
   hintCard, timerSeconds, roundMode,
-  onEndPhase, isHost,
+  onEndPhase, isHost, teamColor,
 }: Props) {
   const isUrgent = roundMode === 'timed' && timerSeconds !== null && timerSeconds <= 10;
 
@@ -39,7 +40,22 @@ export default function QuestionPhase({
 
       {/* Story — prominent, centered */}
       <div className="px-5 pt-5 pb-3">
-        <div className="story-card rounded-xl p-5">
+        <div
+          className="rounded-xl p-5 relative overflow-hidden"
+          style={{
+            background: 'linear-gradient(135deg, var(--bg-elevated) 0%, rgba(31, 28, 50, 0.8) 100%)',
+            border: `1px solid ${teamColor ? teamColor + '20' : 'rgba(232, 168, 73, 0.12)'}`,
+          }}
+        >
+          <div
+            className="absolute top-0 left-0 right-0 h-[2px]"
+            style={{
+              background: teamColor
+                ? `linear-gradient(90deg, transparent, ${teamColor}, transparent)`
+                : 'linear-gradient(90deg, transparent, var(--game-accent), transparent)',
+              opacity: 0.4,
+            }}
+          />
           <p className="text-base leading-relaxed text-center">
             &ldquo;{story}&rdquo;
           </p>
