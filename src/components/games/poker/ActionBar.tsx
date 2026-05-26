@@ -8,6 +8,7 @@ interface ActionBarProps {
   currentBet: number;     // highest bet this round
   myChips: number;        // player's remaining chips
   potTotal: number;       // total pot amount
+  isPreflop: boolean;     // whether we're in preflop (for better button text)
   onFold: () => void;
   onCheck: () => void;
   onCall: () => void;
@@ -17,7 +18,7 @@ interface ActionBarProps {
 }
 
 export function ActionBar({
-  callAmount, minRaise, currentBet, myChips, potTotal,
+  callAmount, minRaise, currentBet, myChips, potTotal, isPreflop,
   onFold, onCheck, onCall, onRaise, onAllIn, turnTimer,
 }: ActionBarProps) {
   const [showRaisePanel, setShowRaisePanel] = useState(false);
@@ -142,7 +143,7 @@ export function ActionBar({
             className="flex-1 py-3.5 rounded-xl bg-(--bg-elevated) border border-(--border-light) text-(--text-primary) font-semibold text-base active:scale-95 transition-transform"
             aria-label={`Call ${callAmount}`}
           >
-            Call {callAmount}
+            {isPreflop ? `Call ${callAmount} (blind)` : `Call ${callAmount}`}
           </button>
         )}
 
