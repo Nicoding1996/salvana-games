@@ -170,7 +170,7 @@ export function useRoom() {
     getSocket().emit('hub:assignTeam', { playerId: targetPlayerId, teamId });
   }, []);
 
-  const startGame = useCallback((gameId: string, gameSettings?: Partial<import('@/types/games/liars-dice').LiarsDiceSettings>) => {
+  const startGame = useCallback((gameId: string, gameSettings?: Partial<import('@/types/games/liars-dice').LiarsDiceSettings> | Partial<import('@/types/games/battleship').BattleshipSettings>) => {
     getSocket().emit('hub:startGame', gameId, gameSettings);
   }, []);
 

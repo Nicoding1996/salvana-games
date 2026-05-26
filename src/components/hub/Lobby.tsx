@@ -6,6 +6,8 @@ import type { useRoom } from '@/lib/hub/useRoom';
 import type { RoundMode } from '@/types/hub';
 import type { LiarsDiceSettings } from '@/types/games/liars-dice';
 import { DEFAULT_LIARS_DICE_SETTINGS } from '@/types/games/liars-dice';
+import type { BattleshipSettings } from '@/types/games/battleship';
+import { DEFAULT_BATTLESHIP_SETTINGS } from '@/types/games/battleship';
 import QRCode from '@/components/shared/QRCode';
 
 interface LobbyProps {
@@ -15,12 +17,14 @@ interface LobbyProps {
 const GAMES = [
   { id: 'story-thief', name: "Whose Truth?", icon: '📜', tagline: 'Bluff with stories', minPlayers: 4, maxPlayers: 18 },
   { id: 'liars-dice', name: "Liar's Dice", icon: '🎲', tagline: 'Bluff with dice', minPlayers: 2, maxPlayers: 6 },
+  { id: 'battleship', name: "Battleship", icon: '⚓', tagline: 'Sink their fleet', minPlayers: 2, maxPlayers: 4 },
 ] as const;
 
 export default function Lobby({ roomHook }: LobbyProps) {
   const { room, playerId, isHost, updateSettings, assignTeam, shuffleTeams, startGame, selectGame, leaveRoom } = roomHook;
   const [showQR, setShowQR] = useState(false);
   const [diceSettings, setDiceSettings] = useState<LiarsDiceSettings>({ ...DEFAULT_LIARS_DICE_SETTINGS });
+  const [battleshipSettings, setBattleshipSettings] = useState<BattleshipSettings>({ ...DEFAULT_BATTLESHIP_SETTINGS });
   const router = useRouter();
   if (!room) return null;
 
@@ -29,8 +33,13 @@ export default function Lobby({ roomHook }: LobbyProps) {
   const playerCount = Object.keys(room.players).length;
   const selectedGameDef = GAMES.find(g => g.id === selectedGame)!;
   const isLiarsDice = selectedGame === 'liars-dice';
+  const isBattleship = selectedGame === 'battleship';
+  const isFreeForAll = isLiarsDice || isBattleship;
   const tooManyForDice = isLiarsDice && playerCount > diceSettings.maxPlayers;
-  const canStart = playerCount >= selectedGameDef.minPlayers && !tooManyForDice;
+  const tooManyForBattleship = isBattleship && playerCount > battleshipSettings.maxPlayers;
+  const tooMany = tooManyForDice || tooManyForBattleship;
+  const maxPlayersForSelected = isLiarsDice ? diceSettings.maxPlayers : isBattleship ? battleshipSettings.maxPlayers : selectedGameDef.maxPlayers;
+  const canStart = playerCount >= selectedGameDef.minPlayers && !tooMany;
   const roomUrl = typeof window !== 'undefined' ? `${window.location.origin}/room/${room.code}` : '';
 
   const handleLeave = () => {
@@ -46,6 +55,8 @@ export default function Lobby({ roomHook }: LobbyProps) {
   const handleStart = () => {
     if (isLiarsDice) {
       startGame('liars-dice', diceSettings);
+    } else if (isBattleship) {
+      startGame('battleship', battleshipSettings);
     } else {
       startGame('story-thief');
     }
@@ -111,7 +122,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
       )}
 
       {/* Shuffle button — only for team games */}
-      {isHost && !isLiarsDice && (
+      {isHost && !isFreeForAll && (
         <div className="flex justify-end mb-2">
           <button
             onClick={shuffleTeams}
@@ -122,8 +133,8 @@ export default function Lobby({ roomHook }: LobbyProps) {
         </div>
       )}
 
-      {/* Teams — hidden for Liar's Dice */}
-      {!isLiarsDice && (
+      {/* Teams — hidden for free-for-all games */}
+      {!isFreeForAll && (
         <div className="space-y-2.5 mb-5 flex-1 overflow-y-auto">
           {room.teams.map((team) => {
             const myTeam = room.players[playerId || '']?.teamId === team.id;
@@ -177,13 +188,13 @@ export default function Lobby({ roomHook }: LobbyProps) {
         </div>
       )}
 
-      {/* Player list for Liar's Dice (no teams) */}
-      {isLiarsDice && (
+      {/* Player list for free-for-all games (no teams) */}
+      {isFreeForAll && (
         <div className="bg-(--bg-card) border border-(--border) rounded-xl p-3.5 mb-5 flex-1 overflow-y-auto">
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-medium text-sm text-(--text-primary)">Players</h3>
             <span className="text-xs text-(--text-muted)">
-              {playerCount}/{diceSettings.maxPlayers}
+              {playerCount}/{maxPlayersForSelected}
             </span>
           </div>
           <div className="space-y-0.5">
@@ -202,7 +213,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
       )}
 
       {/* Settings (Host only) */}
-      {isHost && !isLiarsDice && (
+      {isHost && !isFreeForAll && (
         <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
           <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Settings</h3>
 
@@ -353,6 +364,114 @@ export default function Lobby({ roomHook }: LobbyProps) {
         </div>
       )}
 
+      {/* Battleship Settings (Host only) */}
+      {isHost && isBattleship && (
+        <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
+          <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Battleship Settings</h3>
+
+          {/* Grid Size */}
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm text-(--text-secondary)">Grid Size</span>
+            <div className="flex gap-1.5">
+              {([7, 8] as const).map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setBattleshipSettings(s => ({ ...s, gridSize: n }))}
+                  className={`px-3.5 py-1.5 rounded-lg text-sm transition-all ${
+                    battleshipSettings.gridSize === n
+                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+                  }`}
+                >
+                  {n}×{n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Shot Mode */}
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <span className="text-sm text-(--text-secondary)">Shots</span>
+              <p className="text-[10px] text-(--text-muted)">Salvo = shots per ship</p>
+            </div>
+            <div className="flex gap-1.5">
+              {(['salvo', 'classic'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setBattleshipSettings(s => ({ ...s, shotMode: mode }))}
+                  className={`px-3 py-1.5 rounded-lg text-xs transition-all ${
+                    battleshipSettings.shotMode === mode
+                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+                  }`}
+                >
+                  {mode === 'salvo' ? '💣 Salvo' : '🎯 Classic'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Turn Timer */}
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm text-(--text-secondary)">Turn Timer</span>
+            <div className="flex gap-1.5">
+              {([15, 30, 45, 0] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setBattleshipSettings(prev => ({ ...prev, turnTimer: s }))}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs transition-all ${
+                    battleshipSettings.turnTimer === s
+                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+                  }`}
+                >
+                  {s === 0 ? 'Off' : `${s}s`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Placement Timer */}
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm text-(--text-secondary)">Place Timer</span>
+            <div className="flex gap-1.5">
+              {([30, 60, 0] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setBattleshipSettings(prev => ({ ...prev, placementTimer: s }))}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs transition-all ${
+                    battleshipSettings.placementTimer === s
+                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+                  }`}
+                >
+                  {s === 0 ? 'Off' : `${s}s`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Sonar Ping */}
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-sm text-(--text-secondary)">Sonar 📡</span>
+              <p className="text-[10px] text-(--text-muted)">Scan 2×2 area once</p>
+            </div>
+            <button
+              onClick={() => setBattleshipSettings(s => ({ ...s, sonarPing: !s.sonarPing }))}
+              className={`px-3.5 py-1.5 rounded-lg text-sm transition-all ${
+                battleshipSettings.sonarPing
+                  ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                  : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+              }`}
+            >
+              {battleshipSettings.sonarPing ? 'On' : 'Off'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Start / Wait */}
       <div className="space-y-2 pb-4">
         {isHost ? (
@@ -363,8 +482,8 @@ export default function Lobby({ roomHook }: LobbyProps) {
           >
             {canStart
               ? `${selectedGameDef.icon} Start ${selectedGameDef.name}`
-              : tooManyForDice
-                ? `Too many players (max ${diceSettings.maxPlayers})`
+              : tooMany
+                ? `Too many players (max ${maxPlayersForSelected})`
                 : `Need ${playersNeeded} more player${playersNeeded !== 1 ? 's' : ''}`
             }
           </button>

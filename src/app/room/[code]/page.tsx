@@ -6,6 +6,7 @@ import { useRoom } from '@/lib/hub/useRoom';
 import Lobby from '@/components/hub/Lobby';
 import StoryThiefGame from '@/components/games/story-thief/StoryThiefGame';
 import LiarsDiceGame from '@/components/games/liars-dice/LiarsDiceGame';
+import BattleshipGame from '@/components/games/battleship/BattleshipGame';
 
 export default function RoomPage() {
   const params = useParams();
@@ -127,6 +128,8 @@ export default function RoomPage() {
         <StoryThiefGame room={room} playerId={playerId!} isHost={roomHook.isHost} onLeaveRoom={roomHook.leaveRoom} />
       ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'liars-dice' ? (
         <LiarsDiceGame roomHook={roomHook} />
+      ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'battleship' ? (
+        <BattleshipGame roomHook={roomHook} />
       ) : (
         <Lobby roomHook={roomHook} />
       )}

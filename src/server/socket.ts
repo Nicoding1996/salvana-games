@@ -5,6 +5,7 @@ import type { Room } from '@/types/hub';
 import * as RoomManager from './hub/RoomManager';
 import * as StoryThief from './games/story-thief/StoryThiefGame';
 import * as LiarsDice from './games/liars-dice/LiarsDiceGame';
+import * as Battleship from './games/battleship/BattleshipGame';
 
 // Guard against double-triggering setup completion
 const setupLocks = new Set<string>();
@@ -70,6 +71,13 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
           if (graceTimer) {
             clearTimeout(graceTimer);
             disconnectGraceTimers.delete(graceKey);
+          }
+        }
+        if (result.room.currentGameId === 'battleship') {
+          Battleship.swapPlayerId(result.room.code, result.oldId, socket.id);
+          const clientState = Battleship.getClientState(result.room.code, socket.id, result.room);
+          if (clientState) {
+            socket.emit('battleship:stateUpdated', clientState);
           }
         }
       } else {
@@ -159,6 +167,21 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
 
         console.log(`[Game] Liar's Dice started in ${room.code}`);
       }
+
+      if (gameId === 'battleship') {
+        room.currentGameId = 'battleship';
+        room.selectedGameId = 'battleship';
+        room.phase = 'playing';
+        Battleship.createGame(room, gameSettings);
+
+        io.to(room.code).emit('hub:roomUpdated', room);
+        broadcastBattleshipState(io, room);
+
+        // Start placement timer if configured
+        startBattleshipPlacementTimer(io, room);
+
+        console.log(`[Game] Battleship started in ${room.code}`);
+      }
     });
 
     // ---- State Refresh (for mobile wake-up) ----
@@ -181,6 +204,12 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         const clientState = LiarsDice.getClientState(room.code, socket.id, room);
         if (clientState) {
           socket.emit('liars-dice:stateUpdated', clientState);
+        }
+      }
+      if (room.currentGameId === 'battleship') {
+        const clientState = Battleship.getClientState(room.code, socket.id, room);
+        if (clientState) {
+          socket.emit('battleship:stateUpdated', clientState);
         }
       }
       console.log(`[Socket] State refresh for ${socket.id}`);
@@ -471,6 +500,138 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       console.log(`[Game] Liar's Dice rematch in ${room.code}`);
     });
 
+    // ---- Battleship Events ----
+
+    socket.on('battleship:placeShips', (data) => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'battleship') return;
+
+      const result = Battleship.placeShips(room.code, socket.id, data.placements);
+      if (!result.success) {
+        socket.emit('hub:error', result.error || 'Invalid placement');
+        return;
+      }
+
+      broadcastBattleshipState(io, room);
+
+      // Check if all players ready
+      if (Battleship.allPlayersReady(room.code, room)) {
+        Battleship.clearRoomTimer(room.code);
+        Battleship.startBattle(room.code);
+        broadcastBattleshipState(io, room);
+        startBattleshipTurnTimer(io, room);
+      }
+    });
+
+    socket.on('battleship:autoPlace', () => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'battleship') return;
+
+      const result = Battleship.autoPlaceShips(room.code, socket.id);
+      if (!result.success) {
+        socket.emit('hub:error', 'Failed to auto-place ships');
+        return;
+      }
+
+      broadcastBattleshipState(io, room);
+
+      // Check if all players ready
+      if (Battleship.allPlayersReady(room.code, room)) {
+        Battleship.clearRoomTimer(room.code);
+        Battleship.startBattle(room.code);
+        broadcastBattleshipState(io, room);
+        startBattleshipTurnTimer(io, room);
+      }
+    });
+
+    socket.on('battleship:fire', (data) => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'battleship') return;
+
+      const result = Battleship.fireShot(room.code, socket.id, data.targetId, data.coordinate, room);
+      if (!result.success) {
+        socket.emit('hub:error', result.error || 'Invalid shot');
+        return;
+      }
+
+      // Broadcast shot result to all
+      const state = Battleship.getGameState(room.code);
+      if (state && state.lastTurnShots.length > 0) {
+        const lastShot = state.lastTurnShots[state.lastTurnShots.length - 1];
+        io.to(room.code).emit('battleship:shotResult', lastShot);
+      }
+
+      broadcastBattleshipState(io, room);
+    });
+
+    socket.on('battleship:endTurn', () => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'battleship') return;
+
+      const state = Battleship.getGameState(room.code);
+      if (!state || state.phase !== 'battle') return;
+      if (state.turnOrder[state.currentPlayerIndex] !== socket.id) return;
+
+      Battleship.clearRoomTimer(room.code);
+      const { gameOver } = Battleship.endTurn(room.code, room);
+      broadcastBattleshipState(io, room);
+
+      if (gameOver) {
+        room.phase = 'finished';
+        io.to(room.code).emit('hub:roomUpdated', room);
+      } else {
+        startBattleshipTurnTimer(io, room);
+      }
+    });
+
+    socket.on('battleship:useSonar', (data) => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'battleship') return;
+
+      const result = Battleship.useSonar(room.code, socket.id, data.targetId, data.topLeft);
+      if (!result.success) {
+        socket.emit('hub:error', result.error || 'Sonar failed');
+        return;
+      }
+
+      // Send sonar result only to the player who used it
+      socket.emit('hub:error', result.hasShip ? '📡 Sonar: Ship detected!' : '📡 Sonar: All clear');
+      broadcastBattleshipState(io, room);
+    });
+
+    socket.on('battleship:endGame', () => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.hostId !== socket.id) return;
+
+      const state = Battleship.getGameState(room.code);
+      if (state) {
+        state.phase = 'finished';
+      }
+      broadcastBattleshipState(io, room);
+      Battleship.endGame(room.code);
+      room.phase = 'lobby';
+      room.currentGameId = null;
+      io.to(room.code).emit('hub:roomUpdated', room);
+    });
+
+    socket.on('battleship:rematch', () => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.hostId !== socket.id) return;
+
+      const oldState = Battleship.getGameState(room.code);
+      const settings = oldState?.settings;
+      Battleship.endGame(room.code);
+
+      room.phase = 'playing';
+      Battleship.createGame(room, settings);
+
+      io.to(room.code).emit('hub:roomUpdated', room);
+      broadcastBattleshipState(io, room);
+      startBattleshipPlacementTimer(io, room);
+
+      console.log(`[Game] Battleship rematch in ${room.code}`);
+    });
+
     // ---- Disconnect ----
 
     socket.on('disconnect', () => {
@@ -548,6 +709,40 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
             LiarsDice.startBidding(room.code);
             broadcastLiarsDiceState(io, room);
             startLiarsDiceTurnTimer(io, room);
+          }
+        }
+
+        if (room.currentGameId === 'battleship') {
+          const state = Battleship.getGameState(room.code);
+
+          // Placement: check if all remaining connected players are ready
+          if (state?.phase === 'placement' && Battleship.allPlayersReady(room.code, room)) {
+            Battleship.clearRoomTimer(room.code);
+            Battleship.startBattle(room.code);
+            broadcastBattleshipState(io, room);
+            startBattleshipTurnTimer(io, room);
+          }
+
+          // Battle: if it's the disconnected player's turn, auto-fire after grace period
+          if (state?.phase === 'battle') {
+            const activeId = state.turnOrder[state.currentPlayerIndex];
+            if (activeId === socket.id) {
+              const graceKey = `${room.code}:${socket.id}`;
+              const graceTimer = setTimeout(() => {
+                disconnectGraceTimers.delete(graceKey);
+                Battleship.clearRoomTimer(room.code);
+                Battleship.handleDisconnectedTurn(room.code, room);
+                const { gameOver } = Battleship.endTurn(room.code, room);
+                broadcastBattleshipState(io, room);
+                if (gameOver) {
+                  room.phase = 'finished';
+                  io.to(room.code).emit('hub:roomUpdated', room);
+                } else {
+                  startBattleshipTurnTimer(io, room);
+                }
+              }, 10000);
+              disconnectGraceTimers.set(graceKey, graceTimer);
+            }
           }
         }
       }
@@ -718,4 +913,96 @@ function schedulePostChallenge(io: SocketIOServer, room: Room): void {
       }, 3000);
     }
   }, 8000);
+}
+
+
+// ---- Battleship Helpers ----
+
+function broadcastBattleshipState(io: SocketIOServer, room: Room): void {
+  for (const pid of Object.keys(room.players)) {
+    if (room.players[pid].connected) {
+      const clientState = Battleship.getClientState(room.code, pid, room);
+      if (clientState) {
+        io.to(pid).emit('battleship:stateUpdated', clientState);
+      }
+    }
+  }
+}
+
+function startBattleshipTurnTimer(io: SocketIOServer, room: Room): void {
+  const state = Battleship.getGameState(room.code);
+  if (!state || state.phase !== 'battle' || state.settings.turnTimer === 0) return;
+
+  Battleship.clearRoomTimer(room.code);
+
+  const turnEnd = Date.now() + state.settings.turnTimer * 1000;
+  state.turnTimerEnd = turnEnd;
+
+  const interval = setInterval(() => {
+    const currentState = Battleship.getGameState(room.code);
+    if (!currentState || currentState.phase !== 'battle' || !currentState.turnTimerEnd) {
+      Battleship.clearRoomTimer(room.code);
+      return;
+    }
+
+    const secondsLeft = Math.max(0, Math.ceil((currentState.turnTimerEnd - Date.now()) / 1000));
+    io.to(room.code).emit('battleship:turnTimer', secondsLeft);
+
+    if (secondsLeft <= 0) {
+      Battleship.clearRoomTimer(room.code);
+
+      // Auto-fire random shots and end turn
+      Battleship.handleDisconnectedTurn(room.code, room);
+      const { gameOver } = Battleship.endTurn(room.code, room);
+      broadcastBattleshipState(io, room);
+
+      if (gameOver) {
+        room.phase = 'finished';
+        io.to(room.code).emit('hub:roomUpdated', room);
+      } else {
+        startBattleshipTurnTimer(io, room);
+      }
+    }
+  }, 1000);
+
+  Battleship.setRoomTimer(room.code, interval);
+}
+
+function startBattleshipPlacementTimer(io: SocketIOServer, room: Room): void {
+  const state = Battleship.getGameState(room.code);
+  if (!state || state.phase !== 'placement' || state.settings.placementTimer === 0) return;
+
+  Battleship.clearRoomTimer(room.code);
+
+  const placementEnd = Date.now() + state.settings.placementTimer * 1000;
+  state.placementTimerEnd = placementEnd;
+
+  const interval = setInterval(() => {
+    const currentState = Battleship.getGameState(room.code);
+    if (!currentState || currentState.phase !== 'placement' || !currentState.placementTimerEnd) {
+      Battleship.clearRoomTimer(room.code);
+      return;
+    }
+
+    const secondsLeft = Math.max(0, Math.ceil((currentState.placementTimerEnd - Date.now()) / 1000));
+    io.to(room.code).emit('battleship:placementTimer', secondsLeft);
+
+    if (secondsLeft <= 0) {
+      Battleship.clearRoomTimer(room.code);
+
+      // Auto-place for any players who haven't placed yet
+      for (const pid of currentState.turnOrder) {
+        if (!currentState.playerData[pid]?.ready) {
+          Battleship.autoPlaceShips(room.code, pid);
+        }
+      }
+
+      // Start battle
+      Battleship.startBattle(room.code);
+      broadcastBattleshipState(io, room);
+      startBattleshipTurnTimer(io, room);
+    }
+  }, 1000);
+
+  Battleship.setRoomTimer(room.code, interval);
 }

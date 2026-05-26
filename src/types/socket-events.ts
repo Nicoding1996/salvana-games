@@ -5,6 +5,7 @@
 import type { Player, Room, RoomSettings } from './hub';
 import type { StoryThiefPhase } from './games/story-thief';
 import type { LiarsDiceClientState, ChallengeResult as LiarsDiceChallengeResult, LiarsDiceSettings } from './games/liars-dice';
+import type { BattleshipClientState, BattleshipSettings, ShipPlacement, Coordinate, ShotEntry } from './games/battleship';
 
 // ---- Hub Events: Client → Server ----
 export interface ClientToServerEvents {
@@ -16,7 +17,7 @@ export interface ClientToServerEvents {
   'hub:assignTeam': (data: { playerId: string; teamId: string }) => void;
   'hub:shuffleTeams': () => void;
   'hub:selectGame': (gameId: string) => void;
-  'hub:startGame': (gameId: string, gameSettings?: Partial<LiarsDiceSettings>) => void;
+  'hub:startGame': (gameId: string, gameSettings?: Partial<LiarsDiceSettings> | Partial<BattleshipSettings>) => void;
   'hub:requestState': () => void;
 
   // Story Thief
@@ -35,6 +36,15 @@ export interface ClientToServerEvents {
   'liars-dice:nextRound': () => void;
   'liars-dice:endGame': () => void;
   'liars-dice:rematch': () => void;
+
+  // Battleship
+  'battleship:placeShips': (data: { placements: ShipPlacement[] }) => void;
+  'battleship:autoPlace': () => void;
+  'battleship:fire': (data: { targetId: string; coordinate: Coordinate }) => void;
+  'battleship:endTurn': () => void;
+  'battleship:useSonar': (data: { targetId: string; topLeft: Coordinate }) => void;
+  'battleship:endGame': () => void;
+  'battleship:rematch': () => void;
 }
 
 // ---- Hub Events: Server → Client ----
@@ -55,6 +65,12 @@ export interface ServerToClientEvents {
   'liars-dice:diceRolled': (dice: number[]) => void;
   'liars-dice:turnTimer': (secondsLeft: number) => void;
   'liars-dice:challengeResult': (result: LiarsDiceChallengeResult) => void;
+
+  // Battleship
+  'battleship:stateUpdated': (state: BattleshipClientState) => void;
+  'battleship:turnTimer': (secondsLeft: number) => void;
+  'battleship:placementTimer': (secondsLeft: number) => void;
+  'battleship:shotResult': (shot: ShotEntry) => void;
 }
 
 // ---- Derived types for client state ----

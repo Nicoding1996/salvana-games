@@ -282,3 +282,60 @@ input, textarea, select { font-size: 16px !important; }
   background: var(--border);
   border-radius: 3px;
 }
+
+/* ============================================
+   Battleship — Per-Game Theme Override
+   ============================================ */
+
+[data-game="battleship"] {
+  --game-accent: #00d4ff;
+  --game-accent-dim: rgba(0, 212, 255, 0.10);
+  --game-accent-strong: #0099cc;
+  --game-secondary: #4a6fa5;
+  --game-secondary-dim: rgba(74, 111, 165, 0.10);
+}
+
+/* Battleship card */
+.battleship-card {
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(31, 28, 50, 0.8) 100%);
+  border: 1px solid rgba(0, 212, 255, 0.15);
+  position: relative;
+  overflow: hidden;
+}
+
+.battleship-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--game-accent), transparent);
+  opacity: 0.5;
+}
+
+/* ============================================
+   Battleship — Animations
+   ============================================ */
+
+@keyframes splash {
+  0% { transform: scale(0.5); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 0; }
+}
+
+@keyframes explosion {
+  0% { transform: scale(0.3) rotate(0deg); opacity: 1; }
+  50% { transform: scale(1.5) rotate(180deg); opacity: 0.9; }
+  100% { transform: scale(1) rotate(360deg); opacity: 1; }
+}
+
+@keyframes shipSink {
+  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+  50% { transform: translateY(4px) rotate(3deg); opacity: 0.8; }
+  100% { transform: translateY(12px) rotate(8deg); opacity: 0.4; }
+}
+
+.animate-splash { animation: splash 0.6s ease-out; }
+.animate-explosion { animation: explosion 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
+.animate-ship-sink { animation: shipSink 1s ease-in forwards; }
