@@ -330,6 +330,55 @@ export function shuffleTeams(socketId: string): Room | null {
   return room;
 }
 
+/**
+ * Host kicks a player from the room. Only works in lobby phase.
+ * Returns the room and kicked player info, or null if invalid.
+ */
+export function kickPlayer(hostSocketId: string, targetPlayerId: string): { room: Room; kickedPlayer: Player } | null {
+  const room = getRoomByPlayer(hostSocketId);
+  if (!room) return null;
+  if (room.hostId !== hostSocketId) return null; // Only host can kick
+  if (room.phase !== 'lobby') return null; // Only in lobby
+  if (targetPlayerId === hostSocketId) return null; // Can't kick yourself
+
+  const player = room.players[targetPlayerId];
+  if (!player) return null;
+
+  // Remove from team
+  if (player.teamId) {
+    const team = room.teams.find(t => t.id === player.teamId);
+    if (team) {
+      team.playerIds = team.playerIds.filter(id => id !== targetPlayerId);
+    }
+  }
+
+  delete room.players[targetPlayerId];
+  playerRoomMap.delete(targetPlayerId);
+  disconnectTimestamps.delete(targetPlayerId);
+
+  room.lastActivity = Date.now();
+  console.log(`[Room] ${player.name} was kicked from ${room.code} by host`);
+  return { room, kickedPlayer: player };
+}
+
+/**
+ * Change a player's avatar. Any player can change their own avatar.
+ */
+export function changeAvatar(socketId: string, avatar: string): Room | null {
+  const room = getRoomByPlayer(socketId);
+  if (!room) return null;
+
+  const player = room.players[socketId];
+  if (!player) return null;
+
+  // Validate avatar is from the allowed set
+  if (!AVATARS.includes(avatar)) return null;
+
+  player.avatar = avatar;
+  room.lastActivity = Date.now();
+  return room;
+}
+
 function autoAssignTeam(room: Room, playerId: string): void {
   const smallest = room.teams.reduce((min, team) =>
     team.playerIds.length < min.playerIds.length ? team : min

@@ -20,6 +20,8 @@ export interface ClientToServerEvents {
   'hub:selectGame': (gameId: string) => void;
   'hub:startGame': (gameId: string, gameSettings?: Partial<LiarsDiceSettings> | Partial<BattleshipSettings> | Partial<PokerSettings>) => void;
   'hub:requestState': () => void;
+  'hub:kickPlayer': (data: { playerId: string }) => void;
+  'hub:changeAvatar': (data: { avatar: string }) => void;
 
   // Story Thief
   'story-thief:submitStory': (data: { text: string }) => void;
@@ -60,6 +62,7 @@ export interface ServerToClientEvents {
   'hub:roomUpdated': (room: Room) => void;
   'hub:playerJoined': (player: Player) => void;
   'hub:playerLeft': (playerId: string) => void;
+  'hub:kicked': (data: { reason: string }) => void;
   'hub:error': (message: string) => void;
 
   // Story Thief

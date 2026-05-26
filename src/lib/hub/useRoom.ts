@@ -81,6 +81,19 @@ function ensureSocketBound() {
     setGlobalRoom(updatedRoom);
   });
 
+  socket.on('hub:kicked', (_data) => {
+    // Kicked by host — clear state and navigate home
+    _room = null;
+    _playerId = null;
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('playerName');
+      sessionStorage.removeItem('roomCode');
+      // Navigate to home page
+      window.location.href = '/';
+    }
+    notifyListeners();
+  });
+
   // Request fresh state when page becomes visible (even if socket stayed connected)
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
@@ -192,6 +205,14 @@ export function useRoom() {
     }
   }, []);
 
+  const kickPlayer = useCallback((targetPlayerId: string) => {
+    getSocket().emit('hub:kickPlayer', { playerId: targetPlayerId });
+  }, []);
+
+  const changeAvatar = useCallback((avatar: string) => {
+    getSocket().emit('hub:changeAvatar', { avatar });
+  }, []);
+
   const isHost = room?.hostId === playerId;
   const myPlayer = playerId && room ? room.players[playerId] : null;
 
@@ -210,6 +231,8 @@ export function useRoom() {
     selectGame,
     shuffleTeams,
     leaveRoom,
+    kickPlayer,
+    changeAvatar,
     setError,
   };
 }

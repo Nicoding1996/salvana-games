@@ -136,6 +136,31 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       io.to(room.code).emit('hub:roomUpdated', room);
     });
 
+    socket.on('hub:kickPlayer', (data) => {
+      const result = RoomManager.kickPlayer(socket.id, data.playerId);
+      if (!result) return;
+
+      // Notify the kicked player
+      io.to(data.playerId).emit('hub:kicked', { reason: 'You were removed by the host' });
+      // Make the kicked player leave the socket room
+      const kickedSocket = io.sockets.sockets.get(data.playerId);
+      if (kickedSocket) {
+        kickedSocket.leave(result.room.code);
+      }
+      // Notify remaining players
+      io.to(result.room.code).emit('hub:playerLeft', data.playerId);
+      io.to(result.room.code).emit('hub:roomUpdated', result.room);
+    });
+
+    socket.on('hub:changeAvatar', (data) => {
+      const avatar = (data.avatar || '').trim();
+      if (!avatar) return;
+      const room = RoomManager.changeAvatar(socket.id, avatar);
+      if (room) {
+        io.to(room.code).emit('hub:roomUpdated', room);
+      }
+    });
+
     socket.on('hub:startGame', (gameId, gameSettings) => {
       const room = RoomManager.getRoomByPlayer(socket.id);
       if (!room || room.hostId !== socket.id) return;

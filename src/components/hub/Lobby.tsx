@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { useRoom } from '@/lib/hub/useRoom';
 import type { RoundMode } from '@/types/hub';
+import { AVATARS } from '@/types/hub';
 import type { LiarsDiceSettings } from '@/types/games/liars-dice';
 import { DEFAULT_LIARS_DICE_SETTINGS } from '@/types/games/liars-dice';
 import type { BattleshipSettings } from '@/types/games/battleship';
@@ -24,8 +25,10 @@ const GAMES = [
 ] as const;
 
 export default function Lobby({ roomHook }: LobbyProps) {
-  const { room, playerId, isHost, updateSettings, assignTeam, shuffleTeams, startGame, selectGame, leaveRoom } = roomHook;
+  const { room, playerId, isHost, updateSettings, assignTeam, shuffleTeams, startGame, selectGame, leaveRoom, kickPlayer, changeAvatar } = roomHook;
   const [showQR, setShowQR] = useState(false);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [kickConfirm, setKickConfirm] = useState<string | null>(null);
   const [diceSettings, setDiceSettings] = useState<LiarsDiceSettings>({ ...DEFAULT_LIARS_DICE_SETTINGS });
   const [battleshipSettings, setBattleshipSettings] = useState<BattleshipSettings>({ ...DEFAULT_BATTLESHIP_SETTINGS });
   const [pokerSettings, setPokerSettings] = useState<PokerSettings>({ ...DEFAULT_POKER_SETTINGS });
@@ -57,6 +60,24 @@ export default function Lobby({ roomHook }: LobbyProps) {
     if (!playerId) return;
     assignTeam(playerId, teamId);
   };
+
+  const handleKick = (targetId: string) => {
+    if (kickConfirm === targetId) {
+      kickPlayer(targetId);
+      setKickConfirm(null);
+    } else {
+      setKickConfirm(targetId);
+      // Reset after 3s
+      setTimeout(() => setKickConfirm(null), 3000);
+    }
+  };
+
+  const handleAvatarSelect = (avatar: string) => {
+    changeAvatar(avatar);
+    setShowAvatarPicker(false);
+  };
+
+  const myAvatar = playerId && room.players[playerId] ? room.players[playerId].avatar : '😎';
 
   const handleStart = () => {
     if (isLiarsDice) {
@@ -98,6 +119,39 @@ export default function Lobby({ roomHook }: LobbyProps) {
           </div>
         )}
       </div>
+
+      {/* Avatar Picker */}
+      <div className="flex justify-center mb-4">
+        <button
+          onClick={() => setShowAvatarPicker(!showAvatarPicker)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-(--border) hover:border-(--brand)/40 transition-colors active:scale-95"
+          aria-label="Change avatar"
+        >
+          <span className="text-2xl">{myAvatar}</span>
+          <span className="text-xs text-(--text-secondary)">Change avatar</span>
+        </button>
+      </div>
+
+      {showAvatarPicker && (
+        <div className="bg-(--bg-card) border border-(--border) rounded-xl p-3 mb-4 animate-slide-up">
+          <div className="grid grid-cols-6 gap-2">
+            {AVATARS.map((avatar) => (
+              <button
+                key={avatar}
+                onClick={() => handleAvatarSelect(avatar)}
+                className={`text-2xl p-2 rounded-lg transition-all active:scale-90 ${
+                  avatar === myAvatar
+                    ? 'bg-(--brand)/20 ring-2 ring-(--brand)'
+                    : 'hover:bg-(--bg-elevated)'
+                }`}
+                aria-label={`Select avatar ${avatar}`}
+              >
+                {avatar}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Game Selector (Host only) */}
       {isHost && (
@@ -183,6 +237,19 @@ export default function Lobby({ roomHook }: LobbyProps) {
                         </span>
                         {player.isHost && <span className="text-(--brand) text-xs">host</span>}
                         {!player.connected && <span className="text-(--text-muted) text-xs">offline</span>}
+                        {isHost && pid !== playerId && (
+                          <button
+                            onClick={() => handleKick(pid)}
+                            className={`ml-auto text-xs px-2 py-0.5 rounded transition-all active:scale-90 ${
+                              kickConfirm === pid
+                                ? 'bg-(--danger)/20 text-(--danger) font-medium'
+                                : 'text-(--text-muted) hover:text-(--danger)'
+                            }`}
+                            aria-label={kickConfirm === pid ? `Confirm kick ${player.name}` : `Kick ${player.name}`}
+                          >
+                            {kickConfirm === pid ? 'Confirm?' : '✕'}
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -214,6 +281,19 @@ export default function Lobby({ roomHook }: LobbyProps) {
                 </span>
                 {player.isHost && <span className="text-(--brand) text-xs">host</span>}
                 {!player.connected && <span className="text-(--text-muted) text-xs">offline</span>}
+                {isHost && player.id !== playerId && (
+                  <button
+                    onClick={() => handleKick(player.id)}
+                    className={`ml-auto text-xs px-2 py-0.5 rounded transition-all active:scale-90 ${
+                      kickConfirm === player.id
+                        ? 'bg-(--danger)/20 text-(--danger) font-medium'
+                        : 'text-(--text-muted) hover:text-(--danger)'
+                    }`}
+                    aria-label={kickConfirm === player.id ? `Confirm kick ${player.name}` : `Kick ${player.name}`}
+                  >
+                    {kickConfirm === player.id ? 'Confirm?' : '✕'}
+                  </button>
+                )}
               </div>
             ))}
           </div>
