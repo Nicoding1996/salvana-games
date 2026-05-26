@@ -6,6 +6,7 @@ import * as RoomManager from './hub/RoomManager';
 import * as StoryThief from './games/story-thief/StoryThiefGame';
 import * as LiarsDice from './games/liars-dice/LiarsDiceGame';
 import * as Battleship from './games/battleship/BattleshipGame';
+import * as Poker from './games/poker/PokerGame';
 
 // Guard against double-triggering setup completion
 const setupLocks = new Set<string>();
@@ -78,6 +79,13 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
           const clientState = Battleship.getClientState(result.room.code, socket.id, result.room);
           if (clientState) {
             socket.emit('battleship:stateUpdated', clientState);
+          }
+        }
+        if (result.room.currentGameId === 'poker') {
+          Poker.swapPlayerId(result.room.code, result.oldId, socket.id);
+          const clientState = Poker.getClientState(result.room.code, socket.id, result.room);
+          if (clientState) {
+            socket.emit('poker:stateUpdated', clientState);
           }
         }
       } else {
@@ -182,6 +190,19 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
 
         console.log(`[Game] Battleship started in ${room.code}`);
       }
+
+      if (gameId === 'poker') {
+        room.currentGameId = 'poker';
+        room.selectedGameId = 'poker';
+        room.phase = 'playing';
+        Poker.createGame(room, gameSettings);
+
+        io.to(room.code).emit('hub:roomUpdated', room);
+        broadcastPokerState(io, room);
+        startPokerTurnTimer(io, room);
+
+        console.log(`[Game] Poker started in ${room.code}`);
+      }
     });
 
     // ---- State Refresh (for mobile wake-up) ----
@@ -210,6 +231,12 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         const clientState = Battleship.getClientState(room.code, socket.id, room);
         if (clientState) {
           socket.emit('battleship:stateUpdated', clientState);
+        }
+      }
+      if (room.currentGameId === 'poker') {
+        const clientState = Poker.getClientState(room.code, socket.id, room);
+        if (clientState) {
+          socket.emit('poker:stateUpdated', clientState);
         }
       }
       console.log(`[Socket] State refresh for ${socket.id}`);
@@ -649,6 +676,92 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       console.log(`[Game] Battleship rematch in ${room.code}`);
     });
 
+    // ---- Poker Events ----
+
+    socket.on('poker:action', (data) => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'poker') return;
+
+      Poker.clearRoomTimer(room.code);
+      const result = Poker.playerAction(room.code, socket.id, data.action, data.raiseAmount, room);
+      if (!result.success) {
+        socket.emit('hub:error', result.error || 'Invalid action');
+        return;
+      }
+
+      broadcastPokerState(io, room);
+
+      if (result.handComplete) {
+        // Hand is over — showdown or fold win
+        const state = Poker.getGameState(room.code);
+        if (state?.lastShowdown) {
+          io.to(room.code).emit('poker:showdown', state.lastShowdown);
+        }
+        // Schedule next hand after pause
+        setTimeout(() => {
+          // Guard: game might have been ended during the pause
+          const currentState = Poker.getGameState(room.code);
+          if (!currentState || currentState.phase === 'finished') return;
+
+          const { gameOver } = Poker.startNextHand(room.code, room);
+          if (gameOver) {
+            const superlatives = Poker.getSuperlatives(room.code, room);
+            io.to(room.code).emit('poker:superlatives', superlatives);
+            room.phase = 'finished';
+            io.to(room.code).emit('hub:roomUpdated', room);
+          }
+          broadcastPokerState(io, room);
+          if (!gameOver) {
+            startPokerTurnTimer(io, room);
+          }
+        }, state?.lastShowdown ? 8000 : 3000); // longer pause for showdown
+      } else {
+        startPokerTurnTimer(io, room);
+      }
+    });
+
+    socket.on('poker:reaction', (data) => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'poker') return;
+      // Broadcast reaction to all players
+      socket.to(room.code).emit('poker:reaction', { playerId: socket.id, emoji: data.emoji });
+    });
+
+    socket.on('poker:endGame', () => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.hostId !== socket.id) return;
+
+      const state = Poker.getGameState(room.code);
+      if (state) {
+        state.phase = 'finished';
+        const superlatives = Poker.getSuperlatives(room.code, room);
+        io.to(room.code).emit('poker:superlatives', superlatives);
+      }
+      broadcastPokerState(io, room);
+      Poker.endGame(room.code);
+      room.phase = 'lobby';
+      room.currentGameId = null;
+      io.to(room.code).emit('hub:roomUpdated', room);
+    });
+
+    socket.on('poker:rematch', () => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.hostId !== socket.id) return;
+
+      const oldState = Poker.getGameState(room.code);
+      const settings = oldState?.settings;
+      Poker.endGame(room.code);
+
+      room.phase = 'playing';
+      Poker.createGame(room, settings);
+
+      io.to(room.code).emit('hub:roomUpdated', room);
+      broadcastPokerState(io, room);
+      startPokerTurnTimer(io, room);
+
+      console.log(`[Game] Poker rematch in ${room.code}`);
+    });
+
     // ---- Disconnect ----
 
     socket.on('disconnect', () => {
@@ -759,6 +872,51 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
                 }
               }, 10000);
               disconnectGraceTimers.set(graceKey, graceTimer);
+            }
+          }
+        }
+
+        if (room.currentGameId === 'poker') {
+          const state = Poker.getGameState(room.code);
+          if (state) {
+            const bettingPhases = ['preflop', 'flop', 'turn', 'river'];
+            if (bettingPhases.includes(state.phase)) {
+              const activeId = state.bettingOrder[state.currentPlayerIndex];
+              if (activeId === socket.id) {
+                // Disconnected player's turn — grace period then auto-fold/check
+                const graceKey = `${room.code}:${socket.id}`;
+                const graceTimer = setTimeout(() => {
+                  disconnectGraceTimers.delete(graceKey);
+                  Poker.clearRoomTimer(room.code);
+                  const currentGameState = Poker.getGameState(room.code);
+                  if (!currentGameState || currentGameState.phase === 'finished') return;
+
+                  const acted = Poker.handleDisconnectedTurn(room.code, room);
+                  if (acted) {
+                    broadcastPokerState(io, room);
+                    const updatedState = Poker.getGameState(room.code);
+                    if (updatedState?.phase === 'roundEnd') {
+                      if (updatedState.lastShowdown) {
+                        io.to(room.code).emit('poker:showdown', updatedState.lastShowdown);
+                      }
+                      setTimeout(() => {
+                        const nextState = Poker.getGameState(room.code);
+                        if (!nextState || nextState.phase === 'finished') return;
+                        const { gameOver } = Poker.startNextHand(room.code, room);
+                        if (gameOver) {
+                          room.phase = 'finished';
+                          io.to(room.code).emit('hub:roomUpdated', room);
+                        }
+                        broadcastPokerState(io, room);
+                        if (!gameOver) startPokerTurnTimer(io, room);
+                      }, 3000);
+                    } else {
+                      startPokerTurnTimer(io, room);
+                    }
+                  }
+                }, 10000);
+                disconnectGraceTimers.set(graceKey, graceTimer);
+              }
             }
           }
         }
@@ -1022,4 +1180,80 @@ function startBattleshipPlacementTimer(io: SocketIOServer, room: Room): void {
   }, 1000);
 
   Battleship.setRoomTimer(room.code, interval);
+}
+
+// ---- Poker Helpers ----
+
+function broadcastPokerState(io: SocketIOServer, room: Room): void {
+  for (const pid of Object.keys(room.players)) {
+    if (room.players[pid].connected) {
+      const clientState = Poker.getClientState(room.code, pid, room);
+      if (clientState) {
+        io.to(pid).emit('poker:stateUpdated', clientState);
+      }
+    }
+  }
+}
+
+function startPokerTurnTimer(io: SocketIOServer, room: Room): void {
+  const state = Poker.getGameState(room.code);
+  if (!state || state.settings.turnTimer === 0) return;
+
+  const bettingPhases = ['preflop', 'flop', 'turn', 'river'];
+  if (!bettingPhases.includes(state.phase)) return;
+
+  Poker.clearRoomTimer(room.code);
+
+  const turnEnd = Date.now() + state.settings.turnTimer * 1000;
+  state.turnTimerEnd = turnEnd;
+
+  const interval = setInterval(() => {
+    const currentState = Poker.getGameState(room.code);
+    if (!currentState || !currentState.turnTimerEnd) {
+      Poker.clearRoomTimer(room.code);
+      return;
+    }
+
+    const bPhases = ['preflop', 'flop', 'turn', 'river'];
+    if (!bPhases.includes(currentState.phase)) {
+      Poker.clearRoomTimer(room.code);
+      return;
+    }
+
+    const secondsLeft = Math.max(0, Math.ceil((currentState.turnTimerEnd - Date.now()) / 1000));
+    io.to(room.code).emit('poker:turnTimer', secondsLeft);
+
+    if (secondsLeft <= 0) {
+      Poker.clearRoomTimer(room.code);
+
+      // Auto-fold (or check if possible)
+      const acted = Poker.handleDisconnectedTurn(room.code, room);
+      if (acted) {
+        broadcastPokerState(io, room);
+        const updatedState = Poker.getGameState(room.code);
+        if (updatedState?.phase === 'roundEnd' || updatedState?.phase === 'showdown') {
+          if (updatedState.lastShowdown) {
+            io.to(room.code).emit('poker:showdown', updatedState.lastShowdown);
+          }
+          setTimeout(() => {
+            const nextState = Poker.getGameState(room.code);
+            if (!nextState || nextState.phase === 'finished') return;
+            const { gameOver } = Poker.startNextHand(room.code, room);
+            if (gameOver) {
+              const superlatives = Poker.getSuperlatives(room.code, room);
+              io.to(room.code).emit('poker:superlatives', superlatives);
+              room.phase = 'finished';
+              io.to(room.code).emit('hub:roomUpdated', room);
+            }
+            broadcastPokerState(io, room);
+            if (!gameOver) startPokerTurnTimer(io, room);
+          }, updatedState.lastShowdown ? 8000 : 3000);
+        } else {
+          startPokerTurnTimer(io, room);
+        }
+      }
+    }
+  }, 1000);
+
+  Poker.setRoomTimer(room.code, interval);
 }

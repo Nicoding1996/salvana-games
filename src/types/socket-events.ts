@@ -6,6 +6,7 @@ import type { Player, Room, RoomSettings } from './hub';
 import type { StoryThiefPhase } from './games/story-thief';
 import type { LiarsDiceClientState, ChallengeResult as LiarsDiceChallengeResult, LiarsDiceSettings } from './games/liars-dice';
 import type { BattleshipClientState, BattleshipSettings, ShipPlacement, Coordinate, ShotEntry } from './games/battleship';
+import type { PokerClientState, PokerSettings, ShowdownResult, PokerSuperlative } from './games/poker';
 
 // ---- Hub Events: Client → Server ----
 export interface ClientToServerEvents {
@@ -17,7 +18,7 @@ export interface ClientToServerEvents {
   'hub:assignTeam': (data: { playerId: string; teamId: string }) => void;
   'hub:shuffleTeams': () => void;
   'hub:selectGame': (gameId: string) => void;
-  'hub:startGame': (gameId: string, gameSettings?: Partial<LiarsDiceSettings> | Partial<BattleshipSettings>) => void;
+  'hub:startGame': (gameId: string, gameSettings?: Partial<LiarsDiceSettings> | Partial<BattleshipSettings> | Partial<PokerSettings>) => void;
   'hub:requestState': () => void;
 
   // Story Thief
@@ -45,6 +46,12 @@ export interface ClientToServerEvents {
   'battleship:useSonar': (data: { targetId: string; topLeft: Coordinate }) => void;
   'battleship:endGame': () => void;
   'battleship:rematch': () => void;
+
+  // Poker
+  'poker:action': (data: { action: 'fold' | 'check' | 'call' | 'raise' | 'allIn'; raiseAmount?: number }) => void;
+  'poker:reaction': (data: { emoji: string }) => void;
+  'poker:endGame': () => void;
+  'poker:rematch': () => void;
 }
 
 // ---- Hub Events: Server → Client ----
@@ -72,6 +79,13 @@ export interface ServerToClientEvents {
   'battleship:placementTimer': (secondsLeft: number) => void;
   'battleship:shotResult': (shot: ShotEntry) => void;
   'battleship:sonarResult': (data: { hasShip: boolean; topLeft: { row: number; col: number }; targetId: string }) => void;
+
+  // Poker
+  'poker:stateUpdated': (state: PokerClientState) => void;
+  'poker:turnTimer': (secondsLeft: number) => void;
+  'poker:showdown': (result: ShowdownResult) => void;
+  'poker:reaction': (data: { playerId: string; emoji: string }) => void;
+  'poker:superlatives': (superlatives: PokerSuperlative[]) => void;
 }
 
 // ---- Derived types for client state ----

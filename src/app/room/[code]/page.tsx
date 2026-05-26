@@ -7,6 +7,7 @@ import Lobby from '@/components/hub/Lobby';
 import StoryThiefGame from '@/components/games/story-thief/StoryThiefGame';
 import LiarsDiceGame from '@/components/games/liars-dice/LiarsDiceGame';
 import BattleshipGame from '@/components/games/battleship/BattleshipGame';
+import { PokerGame } from '@/components/games/poker/PokerGame';
 
 export default function RoomPage() {
   const params = useParams();
@@ -130,6 +131,8 @@ export default function RoomPage() {
         <LiarsDiceGame roomHook={roomHook} />
       ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'battleship' ? (
         <BattleshipGame roomHook={roomHook} />
+      ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'poker' ? (
+        <PokerGame />
       ) : (
         <Lobby roomHook={roomHook} />
       )}

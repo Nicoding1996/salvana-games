@@ -8,6 +8,8 @@ import type { LiarsDiceSettings } from '@/types/games/liars-dice';
 import { DEFAULT_LIARS_DICE_SETTINGS } from '@/types/games/liars-dice';
 import type { BattleshipSettings } from '@/types/games/battleship';
 import { DEFAULT_BATTLESHIP_SETTINGS } from '@/types/games/battleship';
+import type { PokerSettings } from '@/types/games/poker';
+import { DEFAULT_POKER_SETTINGS } from '@/types/games/poker';
 import QRCode from '@/components/shared/QRCode';
 
 interface LobbyProps {
@@ -18,6 +20,7 @@ const GAMES = [
   { id: 'story-thief', name: "Whose Truth?", icon: '📜', tagline: 'Bluff with stories', minPlayers: 4, maxPlayers: 18 },
   { id: 'liars-dice', name: "Liar's Dice", icon: '🎲', tagline: 'Bluff with dice', minPlayers: 2, maxPlayers: 6 },
   { id: 'battleship', name: "Battleship", icon: '⚓', tagline: 'Sink their fleet', minPlayers: 2, maxPlayers: 4 },
+  { id: 'poker', name: "Poker", icon: '♠️', tagline: 'Hold\'em tournament', minPlayers: 2, maxPlayers: 8 },
 ] as const;
 
 export default function Lobby({ roomHook }: LobbyProps) {
@@ -25,6 +28,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
   const [showQR, setShowQR] = useState(false);
   const [diceSettings, setDiceSettings] = useState<LiarsDiceSettings>({ ...DEFAULT_LIARS_DICE_SETTINGS });
   const [battleshipSettings, setBattleshipSettings] = useState<BattleshipSettings>({ ...DEFAULT_BATTLESHIP_SETTINGS });
+  const [pokerSettings, setPokerSettings] = useState<PokerSettings>({ ...DEFAULT_POKER_SETTINGS });
   const router = useRouter();
   if (!room) return null;
 
@@ -34,11 +38,13 @@ export default function Lobby({ roomHook }: LobbyProps) {
   const selectedGameDef = GAMES.find(g => g.id === selectedGame) || GAMES[0];
   const isLiarsDice = selectedGame === 'liars-dice';
   const isBattleship = selectedGame === 'battleship';
-  const isFreeForAll = isLiarsDice || isBattleship;
+  const isPoker = selectedGame === 'poker';
+  const isFreeForAll = isLiarsDice || isBattleship || isPoker;
   const tooManyForDice = isLiarsDice && playerCount > diceSettings.maxPlayers;
   const tooManyForBattleship = isBattleship && playerCount > battleshipSettings.maxPlayers;
-  const tooMany = tooManyForDice || tooManyForBattleship;
-  const maxPlayersForSelected = isLiarsDice ? diceSettings.maxPlayers : isBattleship ? battleshipSettings.maxPlayers : selectedGameDef.maxPlayers;
+  const tooManyForPoker = isPoker && playerCount > pokerSettings.maxPlayers;
+  const tooMany = tooManyForDice || tooManyForBattleship || tooManyForPoker;
+  const maxPlayersForSelected = isLiarsDice ? diceSettings.maxPlayers : isBattleship ? battleshipSettings.maxPlayers : isPoker ? pokerSettings.maxPlayers : selectedGameDef.maxPlayers;
   const canStart = playerCount >= selectedGameDef.minPlayers && !tooMany;
   const roomUrl = typeof window !== 'undefined' ? `${window.location.origin}/room/${room.code}` : '';
 
@@ -57,6 +63,8 @@ export default function Lobby({ roomHook }: LobbyProps) {
       startGame('liars-dice', diceSettings);
     } else if (isBattleship) {
       startGame('battleship', battleshipSettings);
+    } else if (isPoker) {
+      startGame('poker', pokerSettings);
     } else {
       startGame('story-thief');
     }
@@ -467,6 +475,114 @@ export default function Lobby({ roomHook }: LobbyProps) {
               }`}
             >
               {battleshipSettings.sonarPing ? 'On' : 'Off'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Poker Settings (Host only) */}
+      {isHost && isPoker && (
+        <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
+          <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Poker Settings</h3>
+
+          {/* Starting Chips */}
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm text-(--text-secondary)">Chips</span>
+            <div className="flex gap-1.5">
+              {([500, 1000, 2000] as const).map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setPokerSettings(s => ({ ...s, startingChips: n }))}
+                  className={`px-3 py-1.5 rounded-lg text-xs transition-all ${
+                    pokerSettings.startingChips === n
+                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+                  }`}
+                >
+                  🪙{n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Blind Structure */}
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <span className="text-sm text-(--text-secondary)">Blinds</span>
+              <p className="text-[10px] text-(--text-muted)">Speed of increases</p>
+            </div>
+            <div className="flex gap-1.5">
+              {(['slow', 'normal', 'fast'] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setPokerSettings(prev => ({ ...prev, blindStructure: s }))}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs transition-all capitalize ${
+                    pokerSettings.blindStructure === s
+                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Starting Blinds */}
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm text-(--text-secondary)">Start</span>
+            <div className="flex gap-1.5">
+              {(['10/20', '25/50'] as const).map((b) => (
+                <button
+                  key={b}
+                  onClick={() => setPokerSettings(s => ({ ...s, startingBlinds: b }))}
+                  className={`px-3 py-1.5 rounded-lg text-xs transition-all ${
+                    pokerSettings.startingBlinds === b
+                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+                  }`}
+                >
+                  {b}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Turn Timer */}
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm text-(--text-secondary)">Turn Timer</span>
+            <div className="flex gap-1.5">
+              {([15, 30, 45, 0] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setPokerSettings(prev => ({ ...prev, turnTimer: s }))}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs transition-all ${
+                    pokerSettings.turnTimer === s
+                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+                  }`}
+                >
+                  {s === 0 ? 'Off' : `${s}s`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Bounty Mode */}
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-sm text-(--text-secondary)">Bounty 💀</span>
+              <p className="text-[10px] text-(--text-muted)">Track eliminations</p>
+            </div>
+            <button
+              onClick={() => setPokerSettings(s => ({ ...s, bountyMode: !s.bountyMode }))}
+              className={`px-3.5 py-1.5 rounded-lg text-sm transition-all ${
+                pokerSettings.bountyMode
+                  ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                  : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+              }`}
+            >
+              {pokerSettings.bountyMode ? 'On' : 'Off'}
             </button>
           </div>
         </div>
