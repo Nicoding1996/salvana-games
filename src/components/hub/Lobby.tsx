@@ -29,6 +29,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
   const [showQR, setShowQR] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [kickConfirm, setKickConfirm] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [diceSettings, setDiceSettings] = useState<LiarsDiceSettings>({ ...DEFAULT_LIARS_DICE_SETTINGS });
   const [battleshipSettings, setBattleshipSettings] = useState<BattleshipSettings>({ ...DEFAULT_BATTLESHIP_SETTINGS });
   const [pokerSettings, setPokerSettings] = useState<PokerSettings>({ ...DEFAULT_POKER_SETTINGS });
@@ -79,6 +80,18 @@ export default function Lobby({ roomHook }: LobbyProps) {
 
   const myAvatar = playerId && room.players[playerId] ? room.players[playerId].avatar : '😎';
 
+  const handleCopyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(roomUrl || room.code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback for older browsers
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
   const handleStart = () => {
     if (isLiarsDice) {
       startGame('liars-dice', diceSettings);
@@ -98,15 +111,33 @@ export default function Lobby({ roomHook }: LobbyProps) {
       {/* Room Code — tap to show QR */}
       <div className="text-center mb-6 animate-fade-in">
         <p className="text-[10px] uppercase tracking-[0.2em] text-(--text-muted) mb-1">Room Code</p>
-        <button
-          onClick={() => setShowQR(!showQR)}
-          className="text-3xl font-mono font-bold tracking-[0.3em] text-(--brand) hover:text-(--game-accent-strong) transition-colors"
-          aria-label={showQR ? 'Hide QR code' : 'Show QR code'}
-        >
-          {room.code}
-        </button>
+        <div className="flex items-center justify-center gap-2">
+          <button
+            onClick={() => setShowQR(!showQR)}
+            className="text-3xl font-mono font-bold tracking-[0.3em] text-(--brand) hover:text-(--game-accent-strong) transition-colors"
+            aria-label={showQR ? 'Hide QR code' : 'Show QR code'}
+          >
+            {room.code}
+          </button>
+          <button
+            onClick={handleCopyCode}
+            className="p-1.5 rounded-lg text-(--text-muted) hover:text-(--brand) hover:bg-(--bg-elevated) transition-all active:scale-90"
+            aria-label="Copy room link"
+          >
+            {copied ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-(--success)">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+              </svg>
+            )}
+          </button>
+        </div>
         <p className="text-xs text-(--text-muted) mt-1.5">
-          {playerCount} player{playerCount !== 1 ? 's' : ''} · tap code for QR
+          {copied ? '✓ Link copied!' : `${playerCount} player${playerCount !== 1 ? 's' : ''} · tap code for QR`}
         </p>
 
         {/* QR Code */}
