@@ -12,9 +12,8 @@ interface AttackGridProps {
   onEndTurn: () => void;
   onUseSonar: (targetId: string, topLeft: Coordinate) => void;
   shotResult: ShotEntry | null;
+  sonarResult: { hasShip: boolean; topLeft: { row: number; col: number }; targetId: string } | null;
 }
-
-type ViewMode = 'attack' | 'fleet';
 
 export default function AttackGrid({
   gameState,
@@ -23,12 +22,13 @@ export default function AttackGrid({
   onEndTurn,
   onUseSonar,
   shotResult,
+  sonarResult,
 }: AttackGridProps) {
-  const { players, attackGrids, myGrid, isMyTurn, shotsRemaining, settings, sonarUsed } = gameState;
+  const { players, attackGrids, myGrid, isMyTurn, shotsRemaining, settings, sonarUsed, currentTurnShots } = gameState;
 
   const opponents = players.filter(p => p.id !== myId && p.alive);
+  const opponentIds = opponents.map(p => p.id).join(',');
   const [selectedTarget, setSelectedTarget] = useState<string>(opponents[0]?.id || '');
-  const [viewMode, setViewMode] = useState<ViewMode>('attack');
   const [sonarMode, setSonarMode] = useState(false);
 
   // Reset sonar mode when turn changes
@@ -38,8 +38,15 @@ export default function AttackGrid({
     }
   }, [isMyTurn]);
 
+  // Auto-select first opponent if none selected
+  useEffect(() => {
+    if (isMyTurn && opponents.length > 0 && !selectedTarget) {
+      setSelectedTarget(opponents[0]?.id || '');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMyTurn, opponentIds, selectedTarget]);
+
   // Update selected target if current target is eliminated
-  const opponentIds = opponents.map(p => p.id).join(',');
   useEffect(() => {
     if (selectedTarget && !opponents.find(p => p.id === selectedTarget)) {
       setSelectedTarget(opponents[0]?.id || '');
@@ -48,17 +55,30 @@ export default function AttackGrid({
   }, [opponentIds, selectedTarget]);
 
   const gridSize = settings.gridSize;
-  const cellSize = Math.min(Math.floor((375 - 48) / gridSize), 44);
+  // Use actual viewport width on client, fallback to 375 for SSR
+  const viewportWidth = typeof window !== 'undefined' ? Math.min(window.innerWidth, 480) : 375;
+  const availableWidth = viewportWidth - 32; // padding
+  const labelWidth = 20;
+  const cellSize = Math.min(Math.floor((availableWidth - labelWidth) / gridSize), 48);
+  const miniCellSize = Math.max(Math.floor(cellSize * 0.38), 8);
 
-  const currentGrid: CellState[][] = viewMode === 'fleet'
-    ? myGrid
-    : (attackGrids[selectedTarget] || Array.from({ length: gridSize }, () =>
-        Array.from({ length: gridSize }, () => 'empty' as CellState)
-      ));
+  const currentGrid: CellState[][] = attackGrids[selectedTarget] || Array.from({ length: gridSize }, () =>
+    Array.from({ length: gridSize }, () => 'empty' as CellState)
+  );
+
+  // Sonar highlight cells
+  const sonarHighlightCells = new Set<string>();
+  if (sonarResult && sonarResult.targetId === selectedTarget) {
+    for (let r = sonarResult.topLeft.row; r < sonarResult.topLeft.row + 2 && r < gridSize; r++) {
+      for (let c = sonarResult.topLeft.col; c < sonarResult.topLeft.col + 2 && c < gridSize; c++) {
+        sonarHighlightCells.add(`${r},${c}`);
+      }
+    }
+  }
 
   const handleCellTap = (row: number, col: number) => {
-    if (viewMode === 'fleet') return;
     if (!isMyTurn || shotsRemaining <= 0) return;
+    if (!selectedTarget) return;
 
     if (sonarMode) {
       onUseSonar(selectedTarget, { row, col });
@@ -76,56 +96,35 @@ export default function AttackGrid({
     onEndTurn();
   };
 
-  const canFire = isMyTurn && shotsRemaining > 0 && viewMode === 'attack';
+  const canFire = isMyTurn && shotsRemaining > 0;
   const allShotsFired = isMyTurn && shotsRemaining === 0;
+
+  // Incoming hits on MY grid this round (from other players' turns)
+  const incomingHits = currentTurnShots.filter(s => s.targetId === myId);
 
   return (
     <div className="flex flex-col h-full">
-      {/* View toggle tabs */}
-      <div className="flex gap-1 mb-2 px-2">
-        <button
-          onClick={() => setViewMode('attack')}
-          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
-            viewMode === 'attack'
-              ? 'bg-(--game-accent) text-white'
-              : 'bg-(--bg-card) border border-(--border) text-(--text-secondary)'
-          }`}
-        >
-          🎯 Attack
-        </button>
-        <button
-          onClick={() => setViewMode('fleet')}
-          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
-            viewMode === 'fleet'
-              ? 'bg-(--game-accent) text-white'
-              : 'bg-(--bg-card) border border-(--border) text-(--text-secondary)'
-          }`}
-        >
-          🚢 My Fleet
-        </button>
-      </div>
-
-      {/* Target selector (attack mode only) */}
-      {viewMode === 'attack' && opponents.length > 1 && (
-        <div className="flex gap-1.5 px-2 mb-2 overflow-x-auto">
+      {/* Target selector */}
+      {opponents.length > 1 && (
+        <div className="flex gap-1.5 px-1 mb-2 overflow-x-auto pb-1">
           {opponents.map(p => (
             <button
               key={p.id}
               onClick={() => setSelectedTarget(p.id)}
-              className={`shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs transition-all ${
+              className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs transition-all active:scale-95 ${
                 selectedTarget === p.id
-                  ? 'bg-(--game-accent)/20 border border-(--game-accent)/50 text-(--text-primary)'
+                  ? 'bg-(--game-accent)/15 border-2 border-(--game-accent)/60 text-(--text-primary)'
                   : 'bg-(--bg-card) border border-(--border) text-(--text-secondary)'
               }`}
             >
-              <span>{p.avatar}</span>
-              <span>{p.name}</span>
+              <span className="text-base">{p.avatar}</span>
+              <span className="font-medium">{p.name}</span>
               <div className="flex gap-0.5 ml-1">
                 {Array.from({ length: p.totalShips }, (_, i) => (
                   <span
                     key={i}
-                    className={`inline-block w-1 h-2 rounded-sm ${
-                      i < p.shipsRemaining ? 'bg-(--danger)' : 'bg-(--text-muted)/30'
+                    className={`inline-block w-1.5 h-2.5 rounded-sm transition-all ${
+                      i < p.shipsRemaining ? 'bg-(--danger)' : 'bg-(--text-muted)/20'
                     }`}
                   />
                 ))}
@@ -136,37 +135,81 @@ export default function AttackGrid({
       )}
 
       {/* Single opponent header */}
-      {viewMode === 'attack' && opponents.length === 1 && (
-        <div className="px-2 mb-2">
-          <p className="text-xs text-(--text-muted)">
-            Targeting: {opponents[0].avatar} {opponents[0].name}
-          </p>
+      {opponents.length === 1 && (
+        <div className="px-1 mb-2 flex items-center gap-2">
+          <span className="text-base">{opponents[0].avatar}</span>
+          <span className="text-sm font-medium text-(--text-primary)">{opponents[0].name}</span>
+          <div className="flex gap-0.5 ml-1">
+            {Array.from({ length: opponents[0].totalShips }, (_, i) => (
+              <span
+                key={i}
+                className={`inline-block w-1.5 h-2.5 rounded-sm ${
+                  i < opponents[0].shipsRemaining ? 'bg-(--danger)' : 'bg-(--text-muted)/20'
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Sonar result banner */}
+      {sonarResult && sonarResult.targetId === selectedTarget && (
+        <div className={`mx-1 mb-2 px-3 py-2 rounded-xl text-center text-sm font-medium animate-slide-up ${
+          sonarResult.hasShip
+            ? 'bg-(--success)/15 border border-(--success)/30 text-(--success)'
+            : 'bg-(--bg-card) border border-(--border) text-(--text-muted)'
+        }`}>
+          {sonarResult.hasShip ? '📡 Ship detected in scan area!' : '📡 All clear — no ships here'}
         </div>
       )}
 
       {/* Shot result toast */}
       {shotResult && (
-        <div className={`mx-2 mb-2 px-3 py-2 rounded-lg text-center text-sm font-medium animate-slide-up ${
+        <div className={`mx-1 mb-2 px-3 py-2 rounded-xl text-center text-sm font-medium animate-slide-up ${
           shotResult.result === 'miss'
-            ? 'bg-(--bg-card) text-(--text-muted)'
+            ? 'bg-(--bg-card) border border-(--border) text-(--text-muted)'
             : shotResult.result === 'sunk'
-              ? 'bg-(--danger)/20 text-(--danger)'
-              : 'bg-(--game-accent)/20 text-(--game-accent)'
+              ? 'bg-(--danger)/15 border border-(--danger)/30 text-(--danger)'
+              : 'bg-(--game-accent)/15 border border-(--game-accent)/30 text-(--game-accent)'
         }`}>
-          {shotResult.result === 'miss' && '💧 Miss!'}
-          {shotResult.result === 'hit' && '💥 Hit!'}
-          {shotResult.result === 'sunk' && `🔥 You sunk their ${shotResult.sunkShipName}!`}
+          {shotResult.playerId === myId ? (
+            <>
+              {shotResult.result === 'miss' && '💧 Miss!'}
+              {shotResult.result === 'hit' && '💥 Hit!'}
+              {shotResult.result === 'sunk' && `🔥 You sunk ${shotResult.targetName}'s ${shotResult.sunkShipName}!`}
+            </>
+          ) : shotResult.targetId === myId ? (
+            <>
+              {shotResult.result === 'miss' && `💧 ${shotResult.playerName} missed you`}
+              {shotResult.result === 'hit' && `💥 ${shotResult.playerName} hit your ship!`}
+              {shotResult.result === 'sunk' && `🔥 ${shotResult.playerName} sunk your ${shotResult.sunkShipName}!`}
+            </>
+          ) : (
+            <>
+              {shotResult.result === 'miss' && `${shotResult.playerName} → ${shotResult.targetName}: miss`}
+              {shotResult.result === 'hit' && `${shotResult.playerName} hit ${shotResult.targetName}!`}
+              {shotResult.result === 'sunk' && `🔥 ${shotResult.playerName} sunk ${shotResult.targetName}'s ${shotResult.sunkShipName}!`}
+            </>
+          )}
         </div>
       )}
 
-      {/* Grid */}
-      <div className="flex-1 flex flex-col items-center justify-center">
+      {/* Incoming fire notification */}
+      {incomingHits.length > 0 && !isMyTurn && (
+        <div className="mx-1 mb-2 px-3 py-2 rounded-xl text-center text-xs bg-(--danger)/10 border border-(--danger)/20 text-(--danger) animate-slide-up">
+          ⚠️ {incomingHits[incomingHits.length - 1].playerName} fired at your fleet!
+          {incomingHits.some(h => h.result === 'hit' || h.result === 'sunk') && ' — They hit something!'}
+        </div>
+      )}
+
+      {/* Main Attack Grid */}
+      <div className="flex flex-col items-center">
         {/* Column labels */}
-        <div className="flex" style={{ marginLeft: cellSize * 0.6 }}>
+        <div className="flex" style={{ marginLeft: labelWidth }}>
           {Array.from({ length: gridSize }, (_, i) => (
             <div
               key={i}
-              className="text-[9px] text-(--text-muted) text-center"
+              className="text-[9px] text-(--text-muted) text-center font-mono"
               style={{ width: cellSize }}
             >
               {GRID_LABELS_COL[i]}
@@ -178,40 +221,73 @@ export default function AttackGrid({
         {currentGrid.map((row, rowIdx) => (
           <div key={rowIdx} className="flex items-center">
             <div
-              className="text-[9px] text-(--text-muted) text-center"
-              style={{ width: cellSize * 0.6 }}
+              className="text-[9px] text-(--text-muted) text-center font-mono"
+              style={{ width: labelWidth }}
             >
               {rowIdx + 1}
             </div>
-            {row.map((cell, colIdx) => (
-              <GridCell
-                key={colIdx}
-                state={cell}
-                row={rowIdx}
-                col={colIdx}
-                onTap={canFire ? handleCellTap : undefined}
-                disabled={!canFire || cell !== 'empty'}
-                size={cellSize}
-              />
-            ))}
+            {row.map((cell, colIdx) => {
+              const isSonarHighlight = sonarHighlightCells.has(`${rowIdx},${colIdx}`);
+              return (
+                <GridCell
+                  key={colIdx}
+                  state={cell}
+                  row={rowIdx}
+                  col={colIdx}
+                  onTap={canFire ? handleCellTap : undefined}
+                  disabled={!canFire || cell !== 'empty'}
+                  highlight={isSonarHighlight}
+                  sonarMode={sonarMode}
+                  size={cellSize}
+                />
+              );
+            })}
           </div>
         ))}
       </div>
 
+      {/* Mini-map: My Fleet (always visible below attack grid) */}
+      <div className="mt-3 px-1">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-[10px] uppercase tracking-wider text-(--text-muted) font-medium">Your Fleet</span>
+          <div className="flex-1 h-px bg-(--border)" />
+        </div>
+        <div className="flex flex-col items-center bg-[#0d1117]/60 rounded-lg p-2 border border-[#2a3050]/50">
+          {myGrid.map((row, rowIdx) => (
+            <div key={rowIdx} className="flex">
+              {row.map((cell, colIdx) => {
+                let miniColor = 'bg-[#1a1f3a]/50';
+                if (cell === 'ship') miniColor = 'bg-[#0e7490]';
+                if (cell === 'hit') miniColor = 'bg-[#f97316]';
+                if (cell === 'miss') miniColor = 'bg-[#374151]/50';
+                if (cell === 'sunk') miniColor = 'bg-[#dc2626]';
+                return (
+                  <div
+                    key={colIdx}
+                    className={`rounded-[2px] ${miniColor}`}
+                    style={{ width: miniCellSize, height: miniCellSize, margin: 0.5 }}
+                  />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Action buttons */}
       {isMyTurn && (
-        <div className="px-2 py-3 space-y-2">
+        <div className="px-1 pt-3 pb-2 space-y-2">
           {/* Sonar button */}
-          {settings.sonarPing && !sonarUsed && viewMode === 'attack' && !allShotsFired && (
+          {settings.sonarPing && !sonarUsed && !allShotsFired && (
             <button
               onClick={() => setSonarMode(!sonarMode)}
-              className={`w-full py-2.5 rounded-xl text-xs font-medium transition-all ${
+              className={`w-full py-2.5 rounded-xl text-xs font-medium transition-all active:scale-[0.97] ${
                 sonarMode
-                  ? 'bg-(--game-secondary) text-white'
+                  ? 'bg-(--success)/20 border-2 border-(--success)/50 text-(--success)'
                   : 'bg-(--bg-card) border border-(--border) text-(--text-secondary)'
               }`}
             >
-              {sonarMode ? '📡 Tap a cell to scan 2×2 area' : '📡 Use Sonar Ping'}
+              {sonarMode ? '📡 Tap a cell to scan 2×2 area — tap again to cancel' : '📡 Use Sonar Ping (1 use)'}
             </button>
           )}
 
@@ -226,10 +302,10 @@ export default function AttackGrid({
           )}
 
           {/* Shots counter */}
-          {!allShotsFired && (
+          {!allShotsFired && !sonarMode && (
             <div className="text-center">
               <p className="text-xs text-(--text-muted)">
-                {shotsRemaining} shot{shotsRemaining !== 1 ? 's' : ''} remaining
+                🎯 {shotsRemaining} shot{shotsRemaining !== 1 ? 's' : ''} remaining
               </p>
             </div>
           )}

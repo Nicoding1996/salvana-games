@@ -561,6 +561,19 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         io.to(room.code).emit('battleship:shotResult', lastShot);
       }
 
+      // Check if game is over (only 1 player alive)
+      if (state) {
+        const alivePlayers = state.turnOrder.filter(id => state.playerData[id]?.alive);
+        if (alivePlayers.length <= 1) {
+          Battleship.clearRoomTimer(room.code);
+          Battleship.endTurn(room.code, room);
+          broadcastBattleshipState(io, room);
+          room.phase = 'finished';
+          io.to(room.code).emit('hub:roomUpdated', room);
+          return;
+        }
+      }
+
       broadcastBattleshipState(io, room);
     });
 
@@ -594,8 +607,12 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         return;
       }
 
-      // Send sonar result only to the player who used it
-      socket.emit('hub:error', result.hasShip ? '📡 Sonar: Ship detected!' : '📡 Sonar: All clear');
+      // Send sonar result to the player who used it
+      socket.emit('battleship:sonarResult', {
+        hasShip: result.hasShip!,
+        topLeft: data.topLeft,
+        targetId: data.targetId,
+      });
       broadcastBattleshipState(io, room);
     });
 

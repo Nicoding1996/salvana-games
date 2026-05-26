@@ -20,6 +20,7 @@ export default function BattleshipGame({ roomHook }: BattleshipGameProps) {
     turnTimer,
     placementTimer,
     shotResult,
+    sonarResult,
     placeShips,
     autoPlace,
     fire,
@@ -133,7 +134,7 @@ export default function BattleshipGame({ roomHook }: BattleshipGameProps) {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-(--border)/30">
         <div className="flex items-center gap-2">
           <span className="text-lg">⚓</span>
           <div>
@@ -144,17 +145,19 @@ export default function BattleshipGame({ roomHook }: BattleshipGameProps) {
 
         {/* Turn timer */}
         {turnTimer !== null && phase === 'battle' && (
-          <div className={`text-lg font-mono font-bold ${
-            turnTimer <= 10 ? 'text-(--danger) animate-timer-urgent' : 'text-(--text-secondary)'
+          <div className={`text-lg font-mono font-bold px-2.5 py-1 rounded-lg ${
+            turnTimer <= 10
+              ? 'text-(--danger) bg-(--danger)/10 animate-timer-urgent'
+              : 'text-(--text-secondary) bg-(--bg-card)'
           }`}>
             {turnTimer}s
           </div>
         )}
 
-        {/* Shots remaining */}
-        {isMyTurn && (
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-(--text-muted)">Shots:</span>
+        {/* Shots remaining badge */}
+        {isMyTurn && shotsRemaining > 0 && (
+          <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-(--game-accent)/10 border border-(--game-accent)/30">
+            <span className="text-xs">🎯</span>
             <span className="text-sm font-bold text-(--game-accent)">{shotsRemaining}</span>
           </div>
         )}
@@ -162,10 +165,10 @@ export default function BattleshipGame({ roomHook }: BattleshipGameProps) {
 
       {/* Turn indicator */}
       {phase === 'battle' && activePlayer && (
-        <div className="text-center py-1">
+        <div className={`text-center py-2 ${isMyTurn ? 'bg-(--game-accent)/5' : ''}`}>
           {isMyTurn ? (
             <p className="text-sm font-semibold text-(--game-accent)">
-              Your turn! Fire {shotsRemaining} shot{shotsRemaining !== 1 ? 's' : ''}
+              Your turn — fire at will!
             </p>
           ) : (
             <p className="text-xs text-(--text-muted)">
@@ -176,12 +179,12 @@ export default function BattleshipGame({ roomHook }: BattleshipGameProps) {
       )}
 
       {/* Fleet status bar */}
-      <div className="px-4 py-2">
+      <div className="px-4 py-1.5">
         <FleetStatus players={players} myId={pid} />
       </div>
 
-      {/* Attack grid */}
-      <div className="flex-1 px-2">
+      {/* Attack grid + mini-map */}
+      <div className="flex-1 px-3 py-1 overflow-y-auto">
         <AttackGrid
           gameState={gameState}
           myId={pid}
@@ -189,19 +192,20 @@ export default function BattleshipGame({ roomHook }: BattleshipGameProps) {
           onEndTurn={endTurn}
           onUseSonar={useSonar}
           shotResult={shotResult}
+          sonarResult={sonarResult}
         />
       </div>
 
       {/* Spectator message if eliminated */}
       {!amAlive && (
-        <div className="text-center py-4 px-4">
+        <div className="text-center py-3 px-4 bg-(--bg-card)/50 border-t border-(--border)/30">
           <p className="text-sm text-(--text-muted)">☠️ Your fleet is destroyed — watching the battle</p>
         </div>
       )}
 
       {/* Host controls */}
       {isHost && (
-        <div className="px-4 pb-4">
+        <div className="px-4 pb-3 pt-1">
           <button
             onClick={handleEndGame}
             className={`w-full py-2.5 rounded-xl text-xs transition-all ${

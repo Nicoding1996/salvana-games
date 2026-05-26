@@ -71,6 +71,7 @@ export interface ServerToClientEvents {
   'battleship:turnTimer': (secondsLeft: number) => void;
   'battleship:placementTimer': (secondsLeft: number) => void;
   'battleship:shotResult': (shot: ShotEntry) => void;
+  'battleship:sonarResult': (data: { hasShip: boolean; topLeft: { row: number; col: number }; targetId: string }) => void;
 }
 
 // ---- Derived types for client state ----

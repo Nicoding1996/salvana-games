@@ -27,6 +27,7 @@ let _gameState: BattleshipClientState = initialState;
 let _turnTimer: number | null = null;
 let _placementTimer: number | null = null;
 let _shotResult: ShotEntry | null = null;
+let _sonarResult: { hasShip: boolean; topLeft: { row: number; col: number }; targetId: string } | null = null;
 const _listeners = new Set<() => void>();
 let _socketBound = false;
 
@@ -64,6 +65,16 @@ function ensureSocketBound() {
       notifyListeners();
     }, 2000);
   });
+
+  socket.on('battleship:sonarResult', (data: { hasShip: boolean; topLeft: { row: number; col: number }; targetId: string }) => {
+    _sonarResult = data;
+    notifyListeners();
+    // Clear after display time
+    setTimeout(() => {
+      _sonarResult = null;
+      notifyListeners();
+    }, 4000);
+  });
 }
 
 export function useBattleship() {
@@ -71,6 +82,7 @@ export function useBattleship() {
   const [turnTimer, setTurnTimer] = useState<number | null>(_turnTimer);
   const [placementTimer, setPlacementTimer] = useState<number | null>(_placementTimer);
   const [shotResult, setShotResult] = useState<ShotEntry | null>(_shotResult);
+  const [sonarResult, setSonarResult] = useState<typeof _sonarResult>(_sonarResult);
 
   useEffect(() => {
     ensureSocketBound();
@@ -80,6 +92,7 @@ export function useBattleship() {
       setTurnTimer(_turnTimer);
       setPlacementTimer(_placementTimer);
       setShotResult(_shotResult);
+      setSonarResult(_sonarResult);
     };
     _listeners.add(listener);
 
@@ -124,6 +137,7 @@ export function useBattleship() {
     turnTimer,
     placementTimer,
     shotResult,
+    sonarResult,
     placeShips,
     autoPlace,
     fire,

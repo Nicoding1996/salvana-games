@@ -31,7 +31,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
   // Use server-synced selectedGameId so all players see the same view
   const selectedGame = room.selectedGameId || 'story-thief';
   const playerCount = Object.keys(room.players).length;
-  const selectedGameDef = GAMES.find(g => g.id === selectedGame)!;
+  const selectedGameDef = GAMES.find(g => g.id === selectedGame) || GAMES[0];
   const isLiarsDice = selectedGame === 'liars-dice';
   const isBattleship = selectedGame === 'battleship';
   const isFreeForAll = isLiarsDice || isBattleship;
@@ -93,20 +93,20 @@ export default function Lobby({ roomHook }: LobbyProps) {
 
       {/* Game Selector (Host only) */}
       {isHost && (
-        <div className="flex gap-2 mb-4">
+        <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
           {GAMES.map((game) => (
             <button
               key={game.id}
               onClick={() => selectGame(game.id)}
-              className={`flex-1 py-3 px-3 rounded-xl text-center transition-all active:scale-[0.97] ${
+              className={`shrink-0 flex-1 min-w-[100px] py-3 px-2.5 rounded-xl text-center transition-all active:scale-[0.97] ${
                 selectedGame === game.id
                   ? 'bg-(--bg-elevated) ring-2 ring-(--brand) border border-(--brand)/30'
                   : 'bg-(--bg-card) border border-(--border) opacity-60'
               }`}
             >
               <span className="text-2xl block">{game.icon}</span>
-              <span className="text-xs font-medium text-(--text-primary) block mt-1">{game.name}</span>
-              <span className="text-[10px] text-(--text-muted) block">{game.tagline}</span>
+              <span className="text-[11px] font-medium text-(--text-primary) block mt-1 leading-tight">{game.name}</span>
+              <span className="text-[9px] text-(--text-muted) block mt-0.5">{game.tagline}</span>
             </button>
           ))}
         </div>

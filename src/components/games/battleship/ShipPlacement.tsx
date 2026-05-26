@@ -37,6 +37,10 @@ export default function ShipPlacement({
 
   // Build grid state from current placements
   const getGridState = useCallback((): CellState[][] => {
+    if (gridSize <= 0) {
+      return [];
+    }
+
     const grid: CellState[][] = Array.from({ length: gridSize }, () =>
       Array.from({ length: gridSize }, () => 'empty')
     );
@@ -47,7 +51,7 @@ export default function ShipPlacement({
       for (let i = 0; i < shipDef.size; i++) {
         const r = p.direction === 'vertical' ? p.start.row + i : p.start.row;
         const c = p.direction === 'horizontal' ? p.start.col + i : p.start.col;
-        if (r < gridSize && c < gridSize) {
+        if (r >= 0 && r < gridSize && c >= 0 && c < gridSize) {
           grid[r][c] = 'ship';
         }
       }
@@ -55,8 +59,10 @@ export default function ShipPlacement({
 
     // Add preview
     for (const cell of previewCells) {
-      if (grid[cell.row][cell.col] === 'empty') {
-        grid[cell.row][cell.col] = invalidPreview ? 'invalid' : 'preview';
+      if (cell.row >= 0 && cell.row < gridSize && cell.col >= 0 && cell.col < gridSize) {
+        if (grid[cell.row][cell.col] === 'empty') {
+          grid[cell.row][cell.col] = invalidPreview ? 'invalid' : 'preview';
+        }
       }
     }
 
@@ -145,7 +151,10 @@ export default function ShipPlacement({
   };
 
   const grid = getGridState();
-  const cellSize = Math.min(Math.floor((375 - 48) / gridSize), 48);
+  const viewportWidth = typeof window !== 'undefined' ? Math.min(window.innerWidth, 480) : 375;
+  const availableWidth = viewportWidth - 48; // padding
+  const labelWidth = 20;
+  const cellSize = gridSize > 0 ? Math.min(Math.floor((availableWidth - labelWidth) / gridSize), 48) : 44;
 
   if (isReady) {
     return (
