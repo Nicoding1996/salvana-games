@@ -9,6 +9,7 @@ const initialState: BattleshipClientState = {
   phase: 'placement',
   players: [],
   myGrid: [],
+  myShipMap: [],
   attackGrids: {},
   activePlayerId: null,
   isMyTurn: false,

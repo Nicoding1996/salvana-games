@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import type { BattleshipClientState, Coordinate, CellState, ShotEntry } from '@/types/games/battleship';
-import { GRID_LABELS_COL } from '@/types/games/battleship';
+import { GRID_LABELS_COL, SHIP_COLORS } from '@/types/games/battleship';
 import GridCell from './GridCell';
 
 interface AttackGridProps {
@@ -24,7 +24,7 @@ export default function AttackGrid({
   shotResult,
   sonarResult,
 }: AttackGridProps) {
-  const { players, attackGrids, myGrid, isMyTurn, shotsRemaining, settings, sonarUsed, currentTurnShots } = gameState;
+  const { players, attackGrids, myGrid, myShipMap, isMyTurn, shotsRemaining, settings, sonarUsed, currentTurnShots } = gameState;
 
   const opponents = players.filter(p => p.id !== myId && p.alive);
   const opponentIds = opponents.map(p => p.id).join(',');
@@ -252,20 +252,42 @@ export default function AttackGrid({
           <span className="text-[10px] uppercase tracking-wider text-(--text-muted) font-medium">Your Fleet</span>
           <div className="flex-1 h-px bg-(--border)" />
         </div>
-        <div className="flex flex-col items-center bg-[#0d1117]/60 rounded-lg p-2 border border-[#2a3050]/50">
+        <div className="flex flex-col items-center bg-[#080b11] rounded-lg p-2 border border-[#1e293b]/60">
           {myGrid.map((row, rowIdx) => (
             <div key={rowIdx} className="flex">
               {row.map((cell, colIdx) => {
-                let miniColor = 'bg-[#1a1f3a]/50';
-                if (cell === 'ship') miniColor = 'bg-[#0e7490]';
-                if (cell === 'hit') miniColor = 'bg-[#f97316]';
-                if (cell === 'miss') miniColor = 'bg-[#374151]/50';
-                if (cell === 'sunk') miniColor = 'bg-[#dc2626]';
+                let miniColor = '#0f1219'; // empty — very dark
+                let shipId: string | null = null;
+                if (Array.isArray(myShipMap) && myShipMap.length > rowIdx && Array.isArray(myShipMap[rowIdx]) && myShipMap[rowIdx].length > colIdx) {
+                  shipId = myShipMap[rowIdx][colIdx] || null;
+                }
+
+                if (cell === 'ship' || (cell === 'hit' && shipId)) {
+                  if (cell === 'hit') {
+                    miniColor = '#f97316'; // orange fire on ship
+                  } else if (shipId && SHIP_COLORS[shipId]) {
+                    miniColor = SHIP_COLORS[shipId].mini;
+                  } else {
+                    miniColor = '#22d3ee'; // fallback cyan
+                  }
+                } else if (cell === 'hit') {
+                  miniColor = '#f97316';
+                } else if (cell === 'miss') {
+                  miniColor = '#1e293b';
+                } else if (cell === 'sunk') {
+                  miniColor = '#dc2626';
+                }
+
                 return (
                   <div
                     key={colIdx}
-                    className={`rounded-[2px] ${miniColor}`}
-                    style={{ width: miniCellSize, height: miniCellSize, margin: 0.5 }}
+                    className="rounded-[2px]"
+                    style={{
+                      width: miniCellSize,
+                      height: miniCellSize,
+                      margin: 0.5,
+                      backgroundColor: miniColor,
+                    }}
                   />
                 );
               })}

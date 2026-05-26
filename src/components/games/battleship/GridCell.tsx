@@ -10,10 +10,11 @@ interface GridCellProps {
   disabled?: boolean;
   highlight?: boolean;
   sonarMode?: boolean;
+  shipColor?: { bg: string; border: string; mini: string };
   size?: number;
 }
 
-export default function GridCell({ state, row, col, onTap, disabled, highlight, sonarMode, size = 44 }: GridCellProps) {
+export default function GridCell({ state, row, col, onTap, disabled, highlight, sonarMode, shipColor, size = 44 }: GridCellProps) {
   const handleTap = () => {
     if (!disabled && onTap) {
       onTap(row, col);
@@ -33,11 +34,21 @@ export default function GridCell({ state, row, col, onTap, disabled, highlight, 
       }
       break;
     case 'ship':
-      // Ship on my grid — solid teal/cyan block
-      stateClasses = 'bg-gradient-to-br from-[#0e7490] to-[#065f73] border-[#22d3ee]/40';
-      content = (
-        <div className="w-[60%] h-[60%] rounded-[2px] bg-[#22d3ee]/30 border border-[#22d3ee]/50" />
-      );
+      // Ship on my grid — color-coded per ship type
+      if (shipColor) {
+        stateClasses = `border-[${shipColor.border}]/40`;
+        content = (
+          <div
+            className="w-[60%] h-[60%] rounded-[2px] opacity-90"
+            style={{ backgroundColor: shipColor.bg, border: `1px solid ${shipColor.border}50` }}
+          />
+        );
+      } else {
+        stateClasses = 'bg-gradient-to-br from-[#0e7490] to-[#065f73] border-[#22d3ee]/40';
+        content = (
+          <div className="w-[60%] h-[60%] rounded-[2px] bg-[#22d3ee]/30 border border-[#22d3ee]/50" />
+        );
+      }
       break;
     case 'hit':
       // Hit — bright orange/red fire indicator

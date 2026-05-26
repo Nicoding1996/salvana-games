@@ -352,11 +352,15 @@ export function getClientState(
   const myGrid: CellState[][] = Array.from({ length: gridSize }, () =>
     Array.from({ length: gridSize }, () => 'empty' as CellState)
   );
+  const myShipMap: (string | null)[][] = Array.from({ length: gridSize }, () =>
+    Array.from({ length: gridSize }, () => null)
+  );
 
   if (myData) {
     // Place my ships
     for (const ship of myData.ships) {
       for (const cell of ship.cells) {
+        myShipMap[cell.row][cell.col] = ship.shipId;
         if (ship.sunk) {
           myGrid[cell.row][cell.col] = 'sunk';
         } else if (ship.hits.some(h => h.row === cell.row && h.col === cell.col)) {
@@ -418,6 +422,7 @@ export function getClientState(
     phase: state.phase,
     players,
     myGrid,
+    myShipMap,
     attackGrids,
     activePlayerId,
     isMyTurn: activePlayerId === playerId,

@@ -44,6 +44,14 @@ export const SHIPS: ShipDef[] = [
   { id: 'destroyer', name: 'Destroyer', size: 2 },
 ];
 
+// Ship colors for own-fleet display (placement + mini-map)
+export const SHIP_COLORS: Record<string, { bg: string; border: string; mini: string }> = {
+  battleship: { bg: '#0e7490', border: '#22d3ee', mini: '#22d3ee' },   // bright cyan
+  cruiser:    { bg: '#7c3aed', border: '#a78bfa', mini: '#a78bfa' },   // bright purple
+  submarine:  { bg: '#0d9488', border: '#5eead4', mini: '#5eead4' },   // bright emerald
+  destroyer:  { bg: '#b45309', border: '#fbbf24', mini: '#fbbf24' },   // bright amber
+};
+
 // ---- Coordinate & Placement ----
 
 export interface Coordinate {
@@ -90,6 +98,7 @@ export interface BattleshipClientState {
   phase: BattleshipPhase;
   players: BattleshipPlayerInfo[];
   myGrid: CellState[][];           // my ocean grid (ships + incoming hits)
+  myShipMap: (string | null)[][];  // which ship ID occupies each cell (null = no ship)
   attackGrids: Record<string, CellState[][]>; // what I know about each opponent's grid
   activePlayerId: string | null;
   isMyTurn: boolean;

@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react';
 import type { ShipPlacement as ShipPlacementType, Coordinate, Direction } from '@/types/games/battleship';
 import type { BattleshipPlayerInfo } from '@/types/games/battleship';
-import { SHIPS, GRID_LABELS_COL } from '@/types/games/battleship';
+import { SHIPS, GRID_LABELS_COL, SHIP_COLORS } from '@/types/games/battleship';
 import GridCell from './GridCell';
 
 interface ShipPlacementProps {
@@ -36,13 +36,16 @@ export default function ShipPlacement({
   const allPlaced = remainingShips.length === 0;
 
   // Build grid state from current placements
-  const getGridState = useCallback((): CellState[][] => {
+  const getGridState = useCallback((): { grid: CellState[][]; shipIdMap: (string | null)[][] } => {
     if (gridSize <= 0) {
-      return [];
+      return { grid: [], shipIdMap: [] };
     }
 
     const grid: CellState[][] = Array.from({ length: gridSize }, () =>
       Array.from({ length: gridSize }, () => 'empty')
+    );
+    const shipIdMap: (string | null)[][] = Array.from({ length: gridSize }, () =>
+      Array.from({ length: gridSize }, () => null)
     );
 
     for (const p of placements) {
@@ -53,6 +56,7 @@ export default function ShipPlacement({
         const c = p.direction === 'horizontal' ? p.start.col + i : p.start.col;
         if (r >= 0 && r < gridSize && c >= 0 && c < gridSize) {
           grid[r][c] = 'ship';
+          shipIdMap[r][c] = p.shipId;
         }
       }
     }
@@ -66,7 +70,7 @@ export default function ShipPlacement({
       }
     }
 
-    return grid;
+    return { grid, shipIdMap };
   }, [placements, previewCells, invalidPreview, gridSize]);
 
   const isValidPlacement = (start: Coordinate, dir: Direction, size: number): boolean => {
@@ -150,7 +154,7 @@ export default function ShipPlacement({
     setPreviewCells([]);
   };
 
-  const grid = getGridState();
+  const { grid, shipIdMap } = getGridState();
   const viewportWidth = typeof window !== 'undefined' ? Math.min(window.innerWidth, 480) : 375;
   const availableWidth = viewportWidth - 48; // padding
   const labelWidth = 20;
@@ -206,19 +210,25 @@ export default function ShipPlacement({
         {SHIPS.map(ship => {
           const isPlaced = placedShipIds.includes(ship.id);
           const isSelected = selectedShipId === ship.id;
+          const color = SHIP_COLORS[ship.id];
           return (
             <button
               key={ship.id}
               onClick={() => !isPlaced && setSelectedShipId(ship.id)}
               disabled={isPlaced}
-              className={`shrink-0 px-2.5 py-1.5 rounded-lg text-xs transition-all ${
+              className={`shrink-0 px-2.5 py-1.5 rounded-lg text-xs transition-all flex items-center gap-1.5 ${
                 isPlaced
                   ? 'bg-(--bg-card) text-(--text-muted) line-through opacity-50'
                   : isSelected
-                    ? 'bg-(--game-accent) text-white font-medium'
+                    ? 'text-white font-medium'
                     : 'bg-(--bg-card) border border-(--border) text-(--text-secondary)'
               }`}
+              style={isSelected && !isPlaced ? { backgroundColor: color.bg, borderColor: color.border } : undefined}
             >
+              <span
+                className="inline-block w-2.5 h-2.5 rounded-sm"
+                style={{ backgroundColor: isPlaced ? '#5e5678' : color.bg }}
+              />
               {ship.name} ({ship.size})
             </button>
           );
@@ -271,6 +281,8 @@ export default function ShipPlacement({
             {row.map((cell, colIdx) => {
               let cellState: 'empty' | 'ship' | 'hit' | 'miss' | 'sunk' = 'empty';
               if (cell === 'ship') cellState = 'ship';
+              const shipId = shipIdMap[rowIdx]?.[colIdx] || null;
+              const shipColor = shipId ? SHIP_COLORS[shipId] : undefined;
 
               return (
                 <div
@@ -285,6 +297,7 @@ export default function ShipPlacement({
                     onTap={handleCellTap}
                     disabled={allPlaced}
                     highlight={cell === 'preview'}
+                    shipColor={shipColor}
                     size={cellSize}
                   />
                 </div>
