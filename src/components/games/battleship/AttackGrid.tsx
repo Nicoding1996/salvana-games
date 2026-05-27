@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { BattleshipClientState, Coordinate, CellState, ShotEntry } from '@/types/games/battleship';
 import { GRID_LABELS_COL, SHIP_COLORS } from '@/types/games/battleship';
 import GridCell from './GridCell';
@@ -12,6 +12,17 @@ interface AttackGridProps {
   onUseSonar: (targetId: string, topLeft: Coordinate) => void;
   shotResult: ShotEntry | null;
   sonarResult: { hasShip: boolean; topLeft: { row: number; col: number }; targetId: string } | null;
+}
+
+// Haptic feedback helper — light patterns for mobile
+function haptic(type: 'miss' | 'hit' | 'sunk' | 'incoming') {
+  if (typeof navigator === 'undefined' || !navigator.vibrate) return;
+  switch (type) {
+    case 'miss': navigator.vibrate(30); break;
+    case 'hit': navigator.vibrate(100); break;
+    case 'sunk': navigator.vibrate([80, 40, 80, 40, 150]); break;
+    case 'incoming': navigator.vibrate([60, 30, 60]); break;
+  }
 }
 
 export default function AttackGrid({
@@ -28,6 +39,10 @@ export default function AttackGrid({
   const opponentIds = opponents.map(p => p.id).join(',');
   const [selectedTarget, setSelectedTarget] = useState<string>(opponents[0]?.id || '');
   const [sonarMode, setSonarMode] = useState(false);
+  const [shaking, setShaking] = useState(false);
+  const [flashColor, setFlashColor] = useState<string | null>(null);
+  const [newShotCell, setNewShotCell] = useState<string | null>(null); // "row,col" of latest shot for impact anim
+  const prevShotRef = useRef<ShotEntry | null>(null);
 
   // Reset sonar mode when turn changes
   useEffect(() => {
@@ -51,6 +66,40 @@ export default function AttackGrid({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opponentIds, selectedTarget]);
+
+  // Haptic feedback + visual effects on shot results
+  useEffect(() => {
+    if (!shotResult || shotResult === prevShotRef.current) return;
+    prevShotRef.current = shotResult;
+
+    // Track the new cell for impact animation
+    setNewShotCell(`${shotResult.coordinate.row},${shotResult.coordinate.col}`);
+    const clearTimer = setTimeout(() => setNewShotCell(null), 400);
+
+    if (shotResult.playerId === myId) {
+      // I fired — flash + haptic based on result
+      haptic(shotResult.result === 'sunk' ? 'sunk' : shotResult.result === 'hit' ? 'hit' : 'miss');
+      if (shotResult.result === 'hit' || shotResult.result === 'sunk') {
+        setFlashColor('rgba(249,115,22,0.12)');
+      }
+    } else if (shotResult.targetId === myId) {
+      // I got hit — red flash + shake + haptic
+      haptic('incoming');
+      if (shotResult.result === 'hit' || shotResult.result === 'sunk') {
+        setFlashColor('rgba(239,68,68,0.15)');
+        setShaking(true);
+        setTimeout(() => setShaking(false), 400);
+      }
+    }
+
+    // Clear flash
+    if (shotResult.result !== 'miss') {
+      setTimeout(() => setFlashColor(null), 300);
+    }
+
+    return () => clearTimeout(clearTimer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shotResult, myId]);
 
   const gridSize = settings.gridSize;
   // Use actual viewport width on client, fallback to 375 for SSR
@@ -97,7 +146,14 @@ export default function AttackGrid({
   const incomingHits = currentTurnShots.filter(s => s.targetId === myId);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className={`flex flex-col h-full relative ${shaking ? 'animate-screen-shake' : ''}`}>
+      {/* Flash overlay */}
+      {flashColor && (
+        <div
+          className="absolute inset-0 z-20 pointer-events-none rounded-xl animate-flash"
+          style={{ backgroundColor: flashColor }}
+        />
+      )}
       {/* Target selector */}
       {opponents.length > 1 && (
         <div className="flex gap-1.5 px-1 mb-2 overflow-x-auto pb-1">
@@ -222,6 +278,7 @@ export default function AttackGrid({
             </div>
             {row.map((cell, colIdx) => {
               const isSonarHighlight = sonarHighlightCells.has(`${rowIdx},${colIdx}`);
+              const cellKey = `${rowIdx},${colIdx}`;
               return (
                 <GridCell
                   key={colIdx}
@@ -233,6 +290,7 @@ export default function AttackGrid({
                   highlight={isSonarHighlight}
                   sonarMode={sonarMode}
                   size={cellSize}
+                  isNew={newShotCell === cellKey}
                 />
               );
             })}
