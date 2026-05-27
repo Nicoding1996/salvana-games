@@ -202,55 +202,58 @@ export default function AttackGrid({
         </div>
       )}
 
-      {/* Sonar result banner */}
-      {sonarResult && sonarResult.targetId === selectedTarget && (
-        <div className={`mx-1 mb-2 px-3 py-2 rounded-xl text-center text-sm font-medium animate-slide-up ${
-          sonarResult.hasShip
-            ? 'bg-(--success)/15 border border-(--success)/30 text-(--success)'
-            : 'bg-(--bg-card) border border-(--border) text-(--text-muted)'
-        }`}>
-          {sonarResult.hasShip ? '📡 Ship detected in scan area!' : '📡 All clear — no ships here'}
-        </div>
-      )}
+      {/* Fixed-height status bar — single slot, no layout shift */}
+      <div className="mx-1 mb-2 h-9 flex items-center justify-center relative overflow-hidden">
+        {(() => {
+          // Priority: incoming fire > sonar > shot result > idle
+          let text = '';
+          let colorClass = 'text-(--text-muted)';
+          let bgClass = 'bg-transparent';
 
-      {/* Shot result toast */}
-      {shotResult && (
-        <div className={`mx-1 mb-2 px-3 py-2 rounded-xl text-center text-sm font-medium animate-slide-up ${
-          shotResult.result === 'miss'
-            ? 'bg-(--bg-card) border border-(--border) text-(--text-muted)'
-            : shotResult.result === 'sunk'
-              ? 'bg-(--danger)/15 border border-(--danger)/30 text-(--danger)'
-              : 'bg-(--game-accent)/15 border border-(--game-accent)/30 text-(--game-accent)'
-        }`}>
-          {shotResult.playerId === myId ? (
-            <>
-              {shotResult.result === 'miss' && '💧 Miss!'}
-              {shotResult.result === 'hit' && '💥 Hit!'}
-              {shotResult.result === 'sunk' && `🔥 You sunk ${shotResult.targetName}'s ${shotResult.sunkShipName}!`}
-            </>
-          ) : shotResult.targetId === myId ? (
-            <>
-              {shotResult.result === 'miss' && `💧 ${shotResult.playerName} missed you`}
-              {shotResult.result === 'hit' && `💥 ${shotResult.playerName} hit your ship!`}
-              {shotResult.result === 'sunk' && `🔥 ${shotResult.playerName} sunk your ${shotResult.sunkShipName}!`}
-            </>
-          ) : (
-            <>
-              {shotResult.result === 'miss' && `${shotResult.playerName} → ${shotResult.targetName}: miss`}
-              {shotResult.result === 'hit' && `${shotResult.playerName} hit ${shotResult.targetName}!`}
-              {shotResult.result === 'sunk' && `🔥 ${shotResult.playerName} sunk ${shotResult.targetName}'s ${shotResult.sunkShipName}!`}
-            </>
-          )}
-        </div>
-      )}
+          if (incomingHits.length > 0 && !isMyTurn) {
+            const lastHit = incomingHits[incomingHits.length - 1];
+            const wasHit = incomingHits.some(h => h.result === 'hit' || h.result === 'sunk');
+            text = `⚠️ ${lastHit.playerName} fired at your fleet!${wasHit ? ' — They hit something!' : ''}`;
+            colorClass = 'text-(--danger)';
+            bgClass = 'bg-(--danger)/10 border border-(--danger)/20';
+          } else if (sonarResult && sonarResult.targetId === selectedTarget) {
+            text = sonarResult.hasShip ? '📡 Ship detected in scan area!' : '📡 All clear — no ships here';
+            colorClass = sonarResult.hasShip ? 'text-(--success)' : 'text-(--text-muted)';
+            bgClass = sonarResult.hasShip ? 'bg-(--success)/10 border border-(--success)/20' : 'bg-(--bg-card) border border-(--border)';
+          } else if (shotResult) {
+            if (shotResult.playerId === myId) {
+              if (shotResult.result === 'miss') text = '💧 Miss!';
+              else if (shotResult.result === 'hit') text = '💥 Hit!';
+              else if (shotResult.result === 'sunk') text = `🔥 You sunk ${shotResult.targetName}'s ${shotResult.sunkShipName}!`;
+            } else if (shotResult.targetId === myId) {
+              if (shotResult.result === 'miss') text = `💧 ${shotResult.playerName} missed you`;
+              else if (shotResult.result === 'hit') text = `💥 ${shotResult.playerName} hit your ship!`;
+              else if (shotResult.result === 'sunk') text = `🔥 ${shotResult.playerName} sunk your ${shotResult.sunkShipName}!`;
+            } else {
+              if (shotResult.result === 'miss') text = `${shotResult.playerName} → ${shotResult.targetName}: miss`;
+              else if (shotResult.result === 'hit') text = `${shotResult.playerName} hit ${shotResult.targetName}!`;
+              else if (shotResult.result === 'sunk') text = `🔥 ${shotResult.playerName} sunk ${shotResult.targetName}'s ${shotResult.sunkShipName}!`;
+            }
+            colorClass = shotResult.result === 'miss'
+              ? 'text-(--text-muted)'
+              : shotResult.result === 'sunk' ? 'text-(--danger)' : 'text-(--game-accent)';
+            bgClass = shotResult.result === 'miss'
+              ? 'bg-(--bg-card) border border-(--border)'
+              : shotResult.result === 'sunk' ? 'bg-(--danger)/10 border border-(--danger)/20' : 'bg-(--game-accent)/10 border border-(--game-accent)/20';
+          }
 
-      {/* Incoming fire notification */}
-      {incomingHits.length > 0 && !isMyTurn && (
-        <div className="mx-1 mb-2 px-3 py-2 rounded-xl text-center text-xs bg-(--danger)/10 border border-(--danger)/20 text-(--danger) animate-slide-up">
-          ⚠️ {incomingHits[incomingHits.length - 1].playerName} fired at your fleet!
-          {incomingHits.some(h => h.result === 'hit' || h.result === 'sunk') && ' — They hit something!'}
-        </div>
-      )}
+          if (!text) return null;
+
+          return (
+            <div
+              key={text}
+              className={`w-full px-3 py-1.5 rounded-xl text-center text-xs font-medium truncate animate-fade-in ${colorClass} ${bgClass}`}
+            >
+              {text}
+            </div>
+          );
+        })()}
+      </div>
 
       {/* Main Attack Grid */}
       <div className="flex flex-col items-center">
