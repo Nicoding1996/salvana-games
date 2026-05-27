@@ -14,18 +14,12 @@ import { DEFAULT_POKER_SETTINGS } from '@/types/games/poker';
 import type { Flip7Settings } from '@/types/games/flip7';
 import { DEFAULT_FLIP7_SETTINGS } from '@/types/games/flip7';
 import QRCode from '@/components/shared/QRCode';
+import { GameSelector } from '@/components/hub/GameCard';
+import { GAME_REGISTRY, getGameById, getDefaultGame } from '@/lib/gameRegistry';
 
 interface LobbyProps {
   roomHook: ReturnType<typeof useRoom>;
 }
-
-const GAMES = [
-  { id: 'story-thief', name: "Whose Truth?", icon: '📜', tagline: 'Bluff with stories', minPlayers: 4, maxPlayers: 18 },
-  { id: 'liars-dice', name: "Liar's Dice", icon: '🎲', tagline: 'Bluff with dice', minPlayers: 2, maxPlayers: 6 },
-  { id: 'battleship', name: "Battleship", icon: '⚓', tagline: 'Sink their fleet', minPlayers: 2, maxPlayers: 4 },
-  { id: 'poker', name: "Poker", icon: '♠️', tagline: 'Hold\'em tournament', minPlayers: 2, maxPlayers: 8 },
-  { id: 'flip7', name: "Flip 7", icon: '🃏', tagline: 'Push your luck', minPlayers: 3, maxPlayers: 10 },
-] as const;
 
 export default function Lobby({ roomHook }: LobbyProps) {
   const { room, playerId, isHost, updateSettings, assignTeam, shuffleTeams, startGame, selectGame, leaveRoom, kickPlayer, changeAvatar } = roomHook;
@@ -43,18 +37,19 @@ export default function Lobby({ roomHook }: LobbyProps) {
   // Use server-synced selectedGameId so all players see the same view
   const selectedGame = room.selectedGameId || 'story-thief';
   const playerCount = Object.keys(room.players).length;
-  const selectedGameDef = GAMES.find(g => g.id === selectedGame) || GAMES[0];
-  const isLiarsDice = selectedGame === 'liars-dice';
-  const isBattleship = selectedGame === 'battleship';
-  const isPoker = selectedGame === 'poker';
-  const isFlip7 = selectedGame === 'flip7';
-  const isFreeForAll = isLiarsDice || isBattleship || isPoker || isFlip7;
-  const tooManyForDice = isLiarsDice && playerCount > diceSettings.maxPlayers;
-  const tooManyForBattleship = isBattleship && playerCount > battleshipSettings.maxPlayers;
-  const tooManyForPoker = isPoker && playerCount > pokerSettings.maxPlayers;
-  const tooManyForFlip7 = isFlip7 && playerCount > flip7Settings.maxPlayers;
-  const tooMany = tooManyForDice || tooManyForBattleship || tooManyForPoker || tooManyForFlip7;
-  const maxPlayersForSelected = isLiarsDice ? diceSettings.maxPlayers : isBattleship ? battleshipSettings.maxPlayers : isPoker ? pokerSettings.maxPlayers : isFlip7 ? flip7Settings.maxPlayers : selectedGameDef.maxPlayers;
+  const selectedGameDef = getGameById(selectedGame) || getDefaultGame();
+  const isFreeForAll = !selectedGameDef.isTeamGame;
+
+  // Max player check using game-specific settings where applicable
+  const getMaxPlayers = (): number => {
+    if (selectedGame === 'liars-dice') return diceSettings.maxPlayers;
+    if (selectedGame === 'battleship') return battleshipSettings.maxPlayers;
+    if (selectedGame === 'poker') return pokerSettings.maxPlayers;
+    if (selectedGame === 'flip7') return flip7Settings.maxPlayers;
+    return selectedGameDef.maxPlayers;
+  };
+  const maxPlayersForSelected = getMaxPlayers();
+  const tooMany = playerCount > maxPlayersForSelected;
   const canStart = playerCount >= selectedGameDef.minPlayers && !tooMany;
   const roomUrl = typeof window !== 'undefined' ? `${window.location.origin}/room/${room.code}` : '';
 
@@ -74,7 +69,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
       setKickConfirm(null);
     } else {
       setKickConfirm(targetId);
-      // Reset after 3s
       setTimeout(() => setKickConfirm(null), 3000);
     }
   };
@@ -92,20 +86,19 @@ export default function Lobby({ roomHook }: LobbyProps) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback for older browsers
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
   };
 
   const handleStart = () => {
-    if (isLiarsDice) {
+    if (selectedGame === 'liars-dice') {
       startGame('liars-dice', diceSettings);
-    } else if (isBattleship) {
+    } else if (selectedGame === 'battleship') {
       startGame('battleship', battleshipSettings);
-    } else if (isPoker) {
+    } else if (selectedGame === 'poker') {
       startGame('poker', pokerSettings);
-    } else if (isFlip7) {
+    } else if (selectedGame === 'flip7') {
       startGame('flip7', flip7Settings);
     } else {
       startGame('story-thief');
@@ -117,7 +110,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
   return (
     <div className="flex-1 flex flex-col p-4 max-w-lg mx-auto w-full">
       {/* Room Code — tap to show QR */}
-      <div className="text-center mb-6 animate-fade-in">
+      <div className="text-center mb-5 animate-fade-in">
         <p className="text-[10px] uppercase tracking-[0.2em] text-(--text-muted) mb-1">Room Code</p>
         <div className="flex items-center justify-center gap-2">
           <button
@@ -192,35 +185,16 @@ export default function Lobby({ roomHook }: LobbyProps) {
         </div>
       )}
 
-      {/* Game Selector (Host only) */}
-      {isHost && (
-        <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-          {GAMES.map((game) => (
-            <button
-              key={game.id}
-              onClick={() => selectGame(game.id)}
-              className={`shrink-0 flex-1 min-w-[100px] py-3 px-2.5 rounded-xl text-center transition-all active:scale-[0.97] ${
-                selectedGame === game.id
-                  ? 'bg-(--bg-elevated) ring-2 ring-(--brand) border border-(--brand)/30'
-                  : 'bg-(--bg-card) border border-(--border) opacity-60'
-              }`}
-            >
-              <span className="text-2xl block">{game.icon}</span>
-              <span className="text-[11px] font-medium text-(--text-primary) block mt-1 leading-tight">{game.name}</span>
-              <span className="text-[9px] text-(--text-muted) block mt-0.5">{game.tagline}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Non-host: show which game is selected */}
-      {!isHost && (
-        <div className="text-center mb-4">
-          <p className="text-xs text-(--text-muted)">
-            {selectedGameDef.icon} {selectedGameDef.name}
-          </p>
-        </div>
-      )}
+      {/* ============================================
+          GAME SELECTOR — Horizontal pills + detail
+          ============================================ */}
+      <GameSelector
+        games={GAME_REGISTRY}
+        selectedGameId={selectedGame}
+        isHost={isHost}
+        playerCount={playerCount}
+        onSelect={(id) => selectGame(id)}
+      />
 
       {/* Shuffle button — only for team games */}
       {isHost && !isFreeForAll && (
@@ -269,7 +243,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
                     const player = room.players[pid];
                     if (!player) return null;
                     return (
-                      <div key={pid} className="flex items-center gap-2 text-sm py-0.5">
+                      <div key={pid} className="flex items-center gap-2 text-sm py-0.5 animate-player-join">
                         <span>{player.avatar}</span>
                         <span className={player.connected ? 'text-(--text-primary)' : 'text-(--text-muted)'}>
                           {player.name}
@@ -313,7 +287,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
           </div>
           <div className="space-y-0.5">
             {Object.values(room.players).map((player) => (
-              <div key={player.id} className="flex items-center gap-2 text-sm py-0.5">
+              <div key={player.id} className="flex items-center gap-2 text-sm py-0.5 animate-player-join">
                 <span>{player.avatar}</span>
                 <span className={player.connected ? 'text-(--text-primary)' : 'text-(--text-muted)'}>
                   {player.name}
@@ -339,7 +313,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
         </div>
       )}
 
-      {/* Settings (Host only) */}
+      {/* Settings (Host only) — Whose Truth? */}
       {isHost && !isFreeForAll && (
         <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
           <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Settings</h3>
@@ -409,11 +383,10 @@ export default function Lobby({ roomHook }: LobbyProps) {
       )}
 
       {/* Liar's Dice Settings (Host only) */}
-      {isHost && isLiarsDice && (
+      {isHost && selectedGame === 'liars-dice' && (
         <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
           <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Dice Settings</h3>
 
-          {/* Lives */}
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-(--text-secondary)">Lives</span>
             <div className="flex gap-1.5">
@@ -433,7 +406,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Turn Timer */}
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-(--text-secondary)">Turn Timer</span>
             <div className="flex gap-1.5">
@@ -453,7 +425,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Wild 1s */}
           <div className="flex items-center justify-between mb-3">
             <div>
               <span className="text-sm text-(--text-secondary)">Wild ⚀</span>
@@ -471,7 +442,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </button>
           </div>
 
-          {/* Spot On */}
           <div className="flex items-center justify-between">
             <div>
               <span className="text-sm text-(--text-secondary)">Spot On 🎯</span>
@@ -492,11 +462,10 @@ export default function Lobby({ roomHook }: LobbyProps) {
       )}
 
       {/* Battleship Settings (Host only) */}
-      {isHost && isBattleship && (
+      {isHost && selectedGame === 'battleship' && (
         <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
           <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Battleship Settings</h3>
 
-          {/* Grid Size */}
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-(--text-secondary)">Grid Size</span>
             <div className="flex gap-1.5">
@@ -516,7 +485,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Shot Mode */}
           <div className="flex items-center justify-between mb-3">
             <div>
               <span className="text-sm text-(--text-secondary)">Shots</span>
@@ -539,7 +507,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Turn Timer */}
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-(--text-secondary)">Turn Timer</span>
             <div className="flex gap-1.5">
@@ -559,7 +526,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Placement Timer */}
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-(--text-secondary)">Place Timer</span>
             <div className="flex gap-1.5">
@@ -579,7 +545,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Sonar Ping */}
           <div className="flex items-center justify-between">
             <div>
               <span className="text-sm text-(--text-secondary)">Sonar 📡</span>
@@ -600,11 +565,10 @@ export default function Lobby({ roomHook }: LobbyProps) {
       )}
 
       {/* Poker Settings (Host only) */}
-      {isHost && isPoker && (
+      {isHost && selectedGame === 'poker' && (
         <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
           <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Poker Settings</h3>
 
-          {/* Starting Chips */}
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-(--text-secondary)">Chips</span>
             <div className="flex gap-1.5">
@@ -624,7 +588,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Blind Structure */}
           <div className="flex items-center justify-between mb-3">
             <div>
               <span className="text-sm text-(--text-secondary)">Blinds</span>
@@ -647,7 +610,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Starting Blinds */}
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-(--text-secondary)">Start</span>
             <div className="flex gap-1.5">
@@ -667,7 +629,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Turn Timer */}
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-(--text-secondary)">Turn Timer</span>
             <div className="flex gap-1.5">
@@ -687,7 +648,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Bounty Mode */}
           <div className="flex items-center justify-between">
             <div>
               <span className="text-sm text-(--text-secondary)">Bounty 💀</span>
@@ -708,11 +668,10 @@ export default function Lobby({ roomHook }: LobbyProps) {
       )}
 
       {/* Flip 7 Settings (Host only) */}
-      {isHost && isFlip7 && (
+      {isHost && selectedGame === 'flip7' && (
         <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
           <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Flip 7 Settings</h3>
 
-          {/* Target Score */}
           <div className="flex items-center justify-between mb-3">
             <div>
               <p className="text-xs font-medium text-(--text-primary)">Target Score</p>
@@ -735,7 +694,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Turn Timer */}
           <div className="flex items-center justify-between mb-3">
             <div>
               <p className="text-xs font-medium text-(--text-primary)">Turn Timer</p>
@@ -758,7 +716,6 @@ export default function Lobby({ roomHook }: LobbyProps) {
             </div>
           </div>
 
-          {/* Mode */}
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-medium text-(--text-primary)">Mode</p>
