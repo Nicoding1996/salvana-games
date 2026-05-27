@@ -81,8 +81,13 @@ export function GameSelector({ games, selectedGameId, isHost, playerCount, onSel
         })}
       </div>
 
-      {/* Selected game info bar — always visible, compact */}
-      <div className="mt-2 flex items-center gap-2 text-[10px] text-(--text-muted)">
+      {/* Selected game info bar — tappable to expand details */}
+      <button
+        onClick={() => isHost ? setShowDetail(!showDetail) : setShowDetail(!showDetail)}
+        className="mt-2 w-full flex items-center gap-2 text-[10px] text-(--text-muted) py-1 active:opacity-70 transition-opacity"
+        aria-label={showDetail ? 'Hide game details' : 'Show game details'}
+        aria-expanded={showDetail}
+      >
         <span>{selectedGame.minPlayers}–{selectedGame.maxPlayers} players</span>
         <span>·</span>
         <span>{selectedGame.duration}</span>
@@ -90,14 +95,10 @@ export function GameSelector({ games, selectedGameId, isHost, playerCount, onSel
         <span style={{ color: DIFFICULTY_INFO[selectedGame.difficulty].color }}>
           {DIFFICULTY_INFO[selectedGame.difficulty].label}
         </span>
-        {isHost && (
-          <>
-            <span className="ml-auto text-[9px] opacity-50">
-              {showDetail ? '▲ less' : '▼ more'}
-            </span>
-          </>
-        )}
-      </div>
+        <span className="ml-auto text-[9px] text-(--text-muted) underline underline-offset-2 decoration-dotted">
+          {showDetail ? 'hide' : 'how to play'}
+        </span>
+      </button>
 
       {/* Player count warning */}
       {!canPlay && (
@@ -107,12 +108,14 @@ export function GameSelector({ games, selectedGameId, isHost, playerCount, onSel
         </div>
       )}
 
-      {/* Expandable detail panel */}
+      {/* Expandable detail panel — quick rules */}
       {showDetail && (
-        <div className="mt-2.5 p-3 rounded-xl bg-(--bg-card) border border-(--border) animate-fade-in">
-          <p className="text-xs font-medium text-(--text-primary) leading-snug">{selectedGame.hook}</p>
-          <p className="text-[11px] text-(--text-muted) mt-1.5 leading-relaxed">{selectedGame.howToPlay}</p>
-          <p className="text-[10px] text-(--text-muted) mt-2">✨ Best with {selectedGame.bestWith}</p>
+        <div className="mt-2 p-3 rounded-xl bg-(--bg-card) border border-(--border) animate-fade-in">
+          <p className="text-xs text-(--text-primary) leading-relaxed">{selectedGame.howToPlay}</p>
+          <div className="flex items-center gap-3 mt-2.5 pt-2 border-t border-(--border)">
+            <span className="text-[10px] text-(--text-muted)">👥 Best with {selectedGame.bestWith}</span>
+            <span className="text-[10px] text-(--text-muted)">⏱ {selectedGame.duration}</span>
+          </div>
         </div>
       )}
     </div>
