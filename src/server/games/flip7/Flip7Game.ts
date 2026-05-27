@@ -29,7 +29,7 @@ import {
 // ---- Module-scoped state ----
 
 const games = new Map<string, Flip7ServerState>();
-const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const activeTimers = new Map<string, ReturnType<typeof setInterval>>();
 
 // ---- Deck Construction ----
 
@@ -882,7 +882,7 @@ export function getCurrentPlayerId(roomCode: string): string | null {
 
 // ---- Timer Management ----
 
-export function setRoomTimer(roomCode: string, timer: ReturnType<typeof setTimeout>): void {
+export function setRoomTimer(roomCode: string, timer: ReturnType<typeof setInterval>): void {
   clearRoomTimer(roomCode);
   activeTimers.set(roomCode, timer);
 }

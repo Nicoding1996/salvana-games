@@ -1715,5 +1715,5 @@ function startFlip7TurnTimer(io: SocketIOServer, room: Room): void {
     }
   }, 1000);
 
-  Flip7.setRoomTimer(room.code, interval as unknown as ReturnType<typeof setTimeout>);
+  Flip7.setRoomTimer(room.code, interval);
 }
