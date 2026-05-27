@@ -719,13 +719,16 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
     };
   });
 
+  // Check if this player is still alive in the tournament
+  const amIAlive = myData?.alive ?? false;
+
   // Calculate call amount and min raise for current player
   const toCall = myData ? Math.min(state.currentBet - (myData.currentBet || 0), myData.chips) : 0;
   const minRaiseTotal = state.currentBet + state.minRaise;
 
   // Evaluate player's current hand strength (for helper)
   let myHandStrength: HandEvaluation | null = null;
-  if (myData && myData.holeCards.length === 2 && state.revealedCommunityCount > 0) {
+  if (amIAlive && myData && myData.holeCards.length === 2 && state.revealedCommunityCount > 0) {
     const visibleCommunity = state.communityCards.slice(0, state.revealedCommunityCount);
     const allCards = [...myData.holeCards, ...visibleCommunity];
     if (allCards.length >= 5) {
@@ -736,12 +739,13 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
   return {
     phase: state.phase,
     players,
-    myCards: myData?.holeCards || [],
+    myCards: amIAlive ? (myData?.holeCards || []) : [],
     communityCards: state.communityCards.slice(0, state.revealedCommunityCount),
     pots: state.pots,
     currentBet: state.currentBet,
     activePlayerId: bettingPhases.includes(state.phase) ? activeId : null,
     isMyTurn: bettingPhases.includes(state.phase) && activeId === playerId,
+    amIAlive,
     minRaise: minRaiseTotal,
     callAmount: Math.max(0, toCall),
     handNumber: state.handNumber,

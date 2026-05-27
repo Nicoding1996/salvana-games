@@ -166,6 +166,7 @@ export interface PokerClientState {
   currentBet: number;                 // highest bet in current round
   activePlayerId: string | null;      // whose turn it is
   isMyTurn: boolean;
+  amIAlive: boolean;                  // whether the current player is still in the tournament
   minRaise: number;                   // minimum raise amount
   callAmount: number;                 // how much to call (0 if can check)
   handNumber: number;

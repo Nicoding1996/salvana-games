@@ -72,6 +72,12 @@ export function usePoker() {
     // Immediate sync
     listener();
 
+    // If no state yet, request it from server (handles race condition
+    // where state was broadcast before listeners were bound)
+    if (!_state) {
+      getSocket().emit('hub:requestState');
+    }
+
     return () => {
       _listeners.delete(listener);
     };

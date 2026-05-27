@@ -9,6 +9,7 @@ import { ActionBar } from './ActionBar';
 import { PotDisplay } from './PotDisplay';
 import { Showdown } from './Showdown';
 import { GameOver } from './GameOver';
+import { ActionLog } from './ActionLog';
 
 export function PokerGame() {
   const { state, showdown, superlatives, turnTimer, reactions, fold, check, call, raise, allIn, sendReaction, endGame, rematch } = usePoker();
@@ -80,6 +81,7 @@ export function PokerGame() {
   const showShowdown = showdown && (state.phase === 'showdown' || state.phase === 'roundEnd');
   const isFoldWin = state.phase === 'roundEnd' && !showdown;
   const isBettingPhase = ['preflop', 'flop', 'turn', 'river'].includes(state.phase);
+  const amIAlive = state.amIAlive !== undefined ? state.amIAlive : true;
 
   return (
     <div className="flex flex-col h-full w-full" data-game="poker">
@@ -133,6 +135,11 @@ export function PokerGame() {
         phase={state.phase}
       />
 
+      {/* Action Log */}
+      {isBettingPhase && state.actionHistory.length > 0 && (
+        <ActionLog actions={state.actionHistory} />
+      )}
+
       {/* Showdown Overlay */}
       {showShowdown && showdown && (
         <Showdown result={showdown} />
@@ -149,8 +156,16 @@ export function PokerGame() {
         </div>
       )}
 
+      {/* Eliminated spectator banner */}
+      {!amIAlive && !showShowdown && !isFoldWin && (
+        <div className="px-4 py-6 text-center">
+          <p className="text-lg text-(--text-muted)">💀 You&apos;re out</p>
+          <p className="text-sm text-(--text-muted) mt-1">Spectating...</p>
+        </div>
+      )}
+
       {/* Your Hole Cards */}
-      {!showShowdown && !isFoldWin && (
+      {amIAlive && !showShowdown && !isFoldWin && (
         <CardPeek
           cards={state.myCards}
           handStrength={state.myHandStrength}
@@ -158,7 +173,7 @@ export function PokerGame() {
       )}
 
       {/* Action Bar — only during active betting phases */}
-      {!showShowdown && !isFoldWin && state.isMyTurn && isBettingPhase && (
+      {amIAlive && !showShowdown && !isFoldWin && state.isMyTurn && isBettingPhase && (
         <ActionBar
           callAmount={state.callAmount}
           minRaise={state.minRaise}
@@ -176,7 +191,7 @@ export function PokerGame() {
       )}
 
       {/* Waiting indicator when not your turn */}
-      {!showShowdown && !isFoldWin && !state.isMyTurn && isBettingPhase && (
+      {amIAlive && !showShowdown && !isFoldWin && !state.isMyTurn && isBettingPhase && (
         <div className="px-4 py-3 text-center">
           <p className="text-sm text-(--text-secondary)">
             {state.activePlayerId
