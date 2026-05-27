@@ -41,9 +41,16 @@ function ensureSocketBound() {
     const storedName = typeof window !== 'undefined' ? sessionStorage.getItem('playerName') : null;
     const storedCode = typeof window !== 'undefined' ? sessionStorage.getItem('roomCode') : null;
 
-    if (storedName && storedCode && _room) {
-      // We were in a room — rejoin to re-register with the server
-      console.log(`[useRoom] Reconnected, re-joining room ${storedCode} as ${storedName}`);
+    // Only auto-rejoin if we're on the room page that matches the stored code.
+    // This prevents auto-rejoin when the user navigates to the home page.
+    const onMatchingRoomPage = typeof window !== 'undefined' && storedCode &&
+      window.location.pathname.toLowerCase() === `/room/${storedCode.toLowerCase()}`;
+
+    if (storedName && storedCode && onMatchingRoomPage) {
+      // We're on the matching room page — rejoin to re-register with the server
+      // This handles both reconnection (socket dropped) and full page refresh
+      const reason = _room ? 'Reconnected' : 'Connected with session data';
+      console.log(`[useRoom] ${reason}, re-joining room ${storedCode} as ${storedName}`);
       socket.emit('hub:joinRoom', { code: storedCode, playerName: storedName }, (res) => {
         if (res.success && res.room && res.playerId) {
           setGlobalPlayerId(res.playerId);
@@ -58,15 +65,6 @@ function ensureSocketBound() {
             sessionStorage.removeItem('playerName');
             sessionStorage.removeItem('roomCode');
           }
-        }
-      });
-    } else if (storedName && storedCode) {
-      // We have session data but no room state — try to join
-      console.log(`[useRoom] Connected with session data, joining ${storedCode}`);
-      socket.emit('hub:joinRoom', { code: storedCode, playerName: storedName }, (res) => {
-        if (res.success && res.room && res.playerId) {
-          setGlobalPlayerId(res.playerId);
-          setGlobalRoom(res.room);
         }
       });
     }

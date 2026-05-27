@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRoom } from '@/lib/hub/useRoom';
 
@@ -10,7 +10,24 @@ export default function Home() {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const { createRoom, joinRoom, error, setError } = useRoom();
+  const { createRoom, joinRoom, error, setError, leaveRoom, room } = useRoom();
+
+  // If user navigated to home page while still in a room, leave it cleanly
+  // This handles the case where someone types localhost:3000 in the URL bar
+  // while in an active game — prevents auto-rejoin from sessionStorage
+  useEffect(() => {
+    if (room) {
+      leaveRoom();
+    } else {
+      // Even without room state, clear sessionStorage to prevent auto-rejoin
+      // on the next socket connect event
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('playerName');
+        sessionStorage.removeItem('roomCode');
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleCreate = async () => {
     if (!name.trim()) return;
