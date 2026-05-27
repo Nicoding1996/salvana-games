@@ -7,6 +7,7 @@ import type { StoryThiefPhase } from './games/story-thief';
 import type { LiarsDiceClientState, ChallengeResult as LiarsDiceChallengeResult, LiarsDiceSettings } from './games/liars-dice';
 import type { BattleshipClientState, BattleshipSettings, ShipPlacement, Coordinate, ShotEntry } from './games/battleship';
 import type { PokerClientState, PokerSettings, ShowdownResult, PokerSuperlative } from './games/poker';
+import type { Flip7ClientState, Flip7Settings, Card as Flip7Card } from './games/flip7';
 
 // ---- Hub Events: Client → Server ----
 export interface ClientToServerEvents {
@@ -18,7 +19,7 @@ export interface ClientToServerEvents {
   'hub:assignTeam': (data: { playerId: string; teamId: string }) => void;
   'hub:shuffleTeams': () => void;
   'hub:selectGame': (gameId: string) => void;
-  'hub:startGame': (gameId: string, gameSettings?: Partial<LiarsDiceSettings> | Partial<BattleshipSettings> | Partial<PokerSettings>) => void;
+  'hub:startGame': (gameId: string, gameSettings?: Partial<LiarsDiceSettings> | Partial<BattleshipSettings> | Partial<PokerSettings> | Partial<Flip7Settings>) => void;
   'hub:requestState': () => void;
   'hub:kickPlayer': (data: { playerId: string }) => void;
   'hub:changeAvatar': (data: { avatar: string }) => void;
@@ -54,6 +55,16 @@ export interface ClientToServerEvents {
   'poker:reaction': (data: { emoji: string }) => void;
   'poker:endGame': () => void;
   'poker:rematch': () => void;
+
+  // Flip 7
+  'flip7:hit': () => void;
+  'flip7:stay': () => void;
+  'flip7:useAction': (data: { targetId: string }) => void;
+  'flip7:giveModifier': (data: { targetId: string | null }) => void;
+  'flip7:chaosChoice': (data: { choice: 'hit' | 'stay' }) => void;
+  'flip7:nextRound': () => void;
+  'flip7:endGame': () => void;
+  'flip7:rematch': () => void;
 }
 
 // ---- Hub Events: Server → Client ----
@@ -89,6 +100,12 @@ export interface ServerToClientEvents {
   'poker:showdown': (result: ShowdownResult) => void;
   'poker:reaction': (data: { playerId: string; emoji: string }) => void;
   'poker:superlatives': (superlatives: PokerSuperlative[]) => void;
+
+  // Flip 7
+  'flip7:stateUpdated': (state: Flip7ClientState) => void;
+  'flip7:cardFlipped': (data: { playerId: string; playerName: string; card: Flip7Card; result: 'safe' | 'bust' | 'secondChance' }) => void;
+  'flip7:turnTimer': (secondsLeft: number) => void;
+  'flip7:roundEnd': (data: { scores: { playerId: string; roundScore: number; cumulativeScore: number; busted: boolean }[]; winnerId: string | null; flipSevenBy: string | null }) => void;
 }
 
 // ---- Derived types for client state ----

@@ -11,6 +11,8 @@ import type { BattleshipSettings } from '@/types/games/battleship';
 import { DEFAULT_BATTLESHIP_SETTINGS } from '@/types/games/battleship';
 import type { PokerSettings } from '@/types/games/poker';
 import { DEFAULT_POKER_SETTINGS } from '@/types/games/poker';
+import type { Flip7Settings } from '@/types/games/flip7';
+import { DEFAULT_FLIP7_SETTINGS } from '@/types/games/flip7';
 import QRCode from '@/components/shared/QRCode';
 
 interface LobbyProps {
@@ -22,6 +24,7 @@ const GAMES = [
   { id: 'liars-dice', name: "Liar's Dice", icon: '🎲', tagline: 'Bluff with dice', minPlayers: 2, maxPlayers: 6 },
   { id: 'battleship', name: "Battleship", icon: '⚓', tagline: 'Sink their fleet', minPlayers: 2, maxPlayers: 4 },
   { id: 'poker', name: "Poker", icon: '♠️', tagline: 'Hold\'em tournament', minPlayers: 2, maxPlayers: 8 },
+  { id: 'flip7', name: "Flip 7", icon: '🃏', tagline: 'Push your luck', minPlayers: 3, maxPlayers: 10 },
 ] as const;
 
 export default function Lobby({ roomHook }: LobbyProps) {
@@ -33,6 +36,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
   const [diceSettings, setDiceSettings] = useState<LiarsDiceSettings>({ ...DEFAULT_LIARS_DICE_SETTINGS });
   const [battleshipSettings, setBattleshipSettings] = useState<BattleshipSettings>({ ...DEFAULT_BATTLESHIP_SETTINGS });
   const [pokerSettings, setPokerSettings] = useState<PokerSettings>({ ...DEFAULT_POKER_SETTINGS });
+  const [flip7Settings, setFlip7Settings] = useState<Flip7Settings>({ ...DEFAULT_FLIP7_SETTINGS });
   const router = useRouter();
   if (!room) return null;
 
@@ -43,12 +47,14 @@ export default function Lobby({ roomHook }: LobbyProps) {
   const isLiarsDice = selectedGame === 'liars-dice';
   const isBattleship = selectedGame === 'battleship';
   const isPoker = selectedGame === 'poker';
-  const isFreeForAll = isLiarsDice || isBattleship || isPoker;
+  const isFlip7 = selectedGame === 'flip7';
+  const isFreeForAll = isLiarsDice || isBattleship || isPoker || isFlip7;
   const tooManyForDice = isLiarsDice && playerCount > diceSettings.maxPlayers;
   const tooManyForBattleship = isBattleship && playerCount > battleshipSettings.maxPlayers;
   const tooManyForPoker = isPoker && playerCount > pokerSettings.maxPlayers;
-  const tooMany = tooManyForDice || tooManyForBattleship || tooManyForPoker;
-  const maxPlayersForSelected = isLiarsDice ? diceSettings.maxPlayers : isBattleship ? battleshipSettings.maxPlayers : isPoker ? pokerSettings.maxPlayers : selectedGameDef.maxPlayers;
+  const tooManyForFlip7 = isFlip7 && playerCount > flip7Settings.maxPlayers;
+  const tooMany = tooManyForDice || tooManyForBattleship || tooManyForPoker || tooManyForFlip7;
+  const maxPlayersForSelected = isLiarsDice ? diceSettings.maxPlayers : isBattleship ? battleshipSettings.maxPlayers : isPoker ? pokerSettings.maxPlayers : isFlip7 ? flip7Settings.maxPlayers : selectedGameDef.maxPlayers;
   const canStart = playerCount >= selectedGameDef.minPlayers && !tooMany;
   const roomUrl = typeof window !== 'undefined' ? `${window.location.origin}/room/${room.code}` : '';
 
@@ -99,6 +105,8 @@ export default function Lobby({ roomHook }: LobbyProps) {
       startGame('battleship', battleshipSettings);
     } else if (isPoker) {
       startGame('poker', pokerSettings);
+    } else if (isFlip7) {
+      startGame('flip7', flip7Settings);
     } else {
       startGame('story-thief');
     }
@@ -695,6 +703,82 @@ export default function Lobby({ roomHook }: LobbyProps) {
             >
               {pokerSettings.bountyMode ? 'On' : 'Off'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Flip 7 Settings (Host only) */}
+      {isHost && isFlip7 && (
+        <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
+          <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Flip 7 Settings</h3>
+
+          {/* Target Score */}
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <p className="text-xs font-medium text-(--text-primary)">Target Score</p>
+              <p className="text-[10px] text-(--text-muted)">First to reach wins</p>
+            </div>
+            <div className="flex gap-1.5">
+              {([100, 200, 300] as const).map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setFlip7Settings(s => ({ ...s, targetScore: n }))}
+                  className={`px-3 py-1.5 rounded-lg text-xs transition-all ${
+                    flip7Settings.targetScore === n
+                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Turn Timer */}
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <p className="text-xs font-medium text-(--text-primary)">Turn Timer</p>
+              <p className="text-[10px] text-(--text-muted)">Auto-stay on expire</p>
+            </div>
+            <div className="flex gap-1.5">
+              {([10, 15, 30, 0] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setFlip7Settings(prev => ({ ...prev, turnTimer: s }))}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs transition-all ${
+                    flip7Settings.turnTimer === s
+                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+                  }`}
+                >
+                  {s === 0 ? 'Off' : `${s}s`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Mode */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-(--text-primary)">Mode</p>
+              <p className="text-[10px] text-(--text-muted)">Classic = turns, Chaos = simultaneous</p>
+            </div>
+            <div className="flex gap-1.5">
+              {(['classic', 'chaos'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setFlip7Settings(prev => ({ ...prev, mode: m }))}
+                  className={`px-3 py-1.5 rounded-lg text-xs transition-all capitalize ${
+                    flip7Settings.mode === m
+                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
+                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}

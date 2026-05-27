@@ -7,6 +7,7 @@ import * as StoryThief from './games/story-thief/StoryThiefGame';
 import * as LiarsDice from './games/liars-dice/LiarsDiceGame';
 import * as Battleship from './games/battleship/BattleshipGame';
 import * as Poker from './games/poker/PokerGame';
+import * as Flip7 from './games/flip7/Flip7Game';
 
 // Guard against double-triggering setup completion
 const setupLocks = new Set<string>();
@@ -86,6 +87,20 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
           const clientState = Poker.getClientState(result.room.code, socket.id, result.room);
           if (clientState) {
             socket.emit('poker:stateUpdated', clientState);
+          }
+        }
+        if (result.room.currentGameId === 'flip7') {
+          Flip7.swapPlayerId(result.room.code, result.oldId, socket.id);
+          // Clear any disconnect grace timer
+          const graceKey = `${result.room.code}:${result.oldId}`;
+          const graceTimer = disconnectGraceTimers.get(graceKey);
+          if (graceTimer) {
+            clearTimeout(graceTimer);
+            disconnectGraceTimers.delete(graceKey);
+          }
+          const clientState = Flip7.getClientState(result.room.code, socket.id, result.room);
+          if (clientState) {
+            socket.emit('flip7:stateUpdated', clientState);
           }
         }
       } else {
@@ -180,7 +195,7 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         room.currentGameId = 'liars-dice';
         room.selectedGameId = 'liars-dice';
         room.phase = 'playing';
-        LiarsDice.createGame(room, gameSettings);
+        LiarsDice.createGame(room, gameSettings as Partial<import('@/types/games/liars-dice').LiarsDiceSettings>);
 
         io.to(room.code).emit('hub:roomUpdated', room);
         broadcastLiarsDiceState(io, room);
@@ -205,7 +220,7 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         room.currentGameId = 'battleship';
         room.selectedGameId = 'battleship';
         room.phase = 'playing';
-        Battleship.createGame(room, gameSettings);
+        Battleship.createGame(room, gameSettings as Partial<import('@/types/games/battleship').BattleshipSettings>);
 
         io.to(room.code).emit('hub:roomUpdated', room);
         broadcastBattleshipState(io, room);
@@ -220,13 +235,34 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         room.currentGameId = 'poker';
         room.selectedGameId = 'poker';
         room.phase = 'playing';
-        Poker.createGame(room, gameSettings);
+        Poker.createGame(room, gameSettings as Partial<import('@/types/games/poker').PokerSettings>);
 
         io.to(room.code).emit('hub:roomUpdated', room);
         broadcastPokerState(io, room);
         startPokerTurnTimer(io, room);
 
         console.log(`[Game] Poker started in ${room.code}`);
+      }
+
+      if (gameId === 'flip7') {
+        room.currentGameId = 'flip7';
+        room.selectedGameId = 'flip7';
+        room.phase = 'playing';
+        Flip7.createGame(room, gameSettings as Partial<import('@/types/games/flip7').Flip7Settings>);
+
+        io.to(room.code).emit('hub:roomUpdated', room);
+
+        // Deal initial cards after brief animation delay
+        setTimeout(() => {
+          const state = Flip7.getGameState(room.code);
+          if (state?.phase === 'dealing') {
+            Flip7.dealInitialCards(room.code, room);
+            broadcastFlip7State(io, room);
+            startFlip7TurnTimer(io, room);
+          }
+        }, 2000);
+
+        console.log(`[Game] Flip 7 started in ${room.code}`);
       }
     });
 
@@ -262,6 +298,12 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         const clientState = Poker.getClientState(room.code, socket.id, room);
         if (clientState) {
           socket.emit('poker:stateUpdated', clientState);
+        }
+      }
+      if (room.currentGameId === 'flip7') {
+        const clientState = Flip7.getClientState(room.code, socket.id, room);
+        if (clientState) {
+          socket.emit('flip7:stateUpdated', clientState);
         }
       }
       console.log(`[Socket] State refresh for ${socket.id}`);
@@ -787,6 +829,242 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       console.log(`[Game] Poker rematch in ${room.code}`);
     });
 
+    // ---- Flip 7 Events ----
+
+    socket.on('flip7:hit', () => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'flip7') return;
+
+      Flip7.clearRoomTimer(room.code);
+      const result = Flip7.hit(room.code, socket.id);
+      if (!result) return;
+
+      // Broadcast card flip to all players
+      const player = room.players[socket.id];
+      io.to(room.code).emit('flip7:cardFlipped', {
+        playerId: socket.id,
+        playerName: player?.name || 'Unknown',
+        card: result.card,
+        result: result.result,
+      });
+
+      // Add to activity log
+      Flip7.addActivityLog(room.code, {
+        playerId: socket.id,
+        playerName: player?.name || 'Unknown',
+        card: result.card,
+        result: result.result,
+        timestamp: Date.now(),
+      });
+
+      if (result.turnResult === 'roundEnd') {
+        // Delay round end so bust/flip7 animation has time to play
+        broadcastFlip7State(io, room);
+        setTimeout(() => {
+          const roundResult = Flip7.endRound(room.code);
+          if (roundResult) {
+            io.to(room.code).emit('flip7:roundEnd', roundResult);
+          }
+          broadcastFlip7State(io, room);
+        }, 2000);
+        return;
+      }
+
+      broadcastFlip7State(io, room);
+
+      if (result.turnResult === 'continue' && !result.pendingAction && !result.pendingModifier) {
+        startFlip7TurnTimer(io, room);
+      }
+    });
+
+    socket.on('flip7:stay', () => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'flip7') return;
+
+      Flip7.clearRoomTimer(room.code);
+      const result = Flip7.stay(room.code, socket.id);
+      if (result === null) return;
+
+      // Add to activity log
+      const player = room.players[socket.id];
+      Flip7.addActivityLog(room.code, {
+        playerId: socket.id,
+        playerName: player?.name || 'Unknown',
+        card: null,
+        result: 'stayed',
+        timestamp: Date.now(),
+      });
+
+      if (result === 'roundEnd') {
+        // Brief pause before showing round summary
+        broadcastFlip7State(io, room);
+        setTimeout(() => {
+          const roundResult = Flip7.endRound(room.code);
+          if (roundResult) {
+            io.to(room.code).emit('flip7:roundEnd', roundResult);
+          }
+          broadcastFlip7State(io, room);
+        }, 1500);
+        return;
+      }
+
+      broadcastFlip7State(io, room);
+
+      if (result === 'continue') {
+        startFlip7TurnTimer(io, room);
+      }
+    });
+
+    socket.on('flip7:useAction', (data) => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'flip7') return;
+
+      Flip7.clearRoomTimer(room.code);
+      const result = Flip7.useAction(room.code, socket.id, data.targetId);
+      if (!result) return;
+
+      if (result.type === 'freeze') {
+        const targetPlayer = room.players[data.targetId];
+        Flip7.addActivityLog(room.code, {
+          playerId: data.targetId,
+          playerName: targetPlayer?.name || 'Unknown',
+          card: { type: 'action', kind: 'freeze' },
+          result: 'frozen',
+          timestamp: Date.now(),
+        });
+      }
+
+      if (result.turnResult === 'roundEnd') {
+        broadcastFlip7State(io, room);
+        setTimeout(() => {
+          const roundResult = Flip7.endRound(room.code);
+          if (roundResult) {
+            io.to(room.code).emit('flip7:roundEnd', roundResult);
+          }
+          broadcastFlip7State(io, room);
+        }, 1500);
+        return;
+      }
+
+      broadcastFlip7State(io, room);
+
+      if (result.turnResult === 'continue') {
+        startFlip7TurnTimer(io, room);
+      }
+    });
+
+    socket.on('flip7:giveModifier', (data) => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'flip7') return;
+
+      const result = Flip7.giveModifier(room.code, socket.id, data.targetId);
+      if (result === null) return;
+
+      // Modifier choice doesn't end turn — just broadcast updated state
+      broadcastFlip7State(io, room);
+    });
+
+    socket.on('flip7:chaosChoice', (data) => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.currentGameId !== 'flip7') return;
+
+      Flip7.chaosSubmit(room.code, socket.id, data.choice);
+
+      if (Flip7.allChaosChoicesIn(room.code)) {
+        Flip7.clearRoomTimer(room.code);
+        const chaosResult = Flip7.resolveChaos(room.code);
+        if (!chaosResult) return;
+
+        // Broadcast each card flip
+        for (const r of chaosResult.results) {
+          if (r.choice === 'hit' && r.card) {
+            const player = room.players[r.playerId];
+            io.to(room.code).emit('flip7:cardFlipped', {
+              playerId: r.playerId,
+              playerName: player?.name || 'Unknown',
+              card: r.card,
+              result: r.result || 'safe',
+            });
+          }
+        }
+
+        if (chaosResult.roundEnd) {
+          const roundResult = Flip7.endRound(room.code);
+          if (roundResult) {
+            io.to(room.code).emit('flip7:roundEnd', roundResult);
+          }
+        }
+
+        broadcastFlip7State(io, room);
+
+        if (!chaosResult.roundEnd) {
+          startFlip7TurnTimer(io, room);
+        }
+      }
+    });
+
+    socket.on('flip7:nextRound', () => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.hostId !== socket.id || room.currentGameId !== 'flip7') return;
+
+      const success = Flip7.nextRound(room.code, room);
+      if (!success) return;
+
+      // Broadcast dealing state immediately so clients see animation
+      broadcastFlip7State(io, room);
+
+      // Deal after animation delay
+      setTimeout(() => {
+        const state = Flip7.getGameState(room.code);
+        if (state?.phase === 'dealing') {
+          Flip7.dealInitialCards(room.code, room);
+          broadcastFlip7State(io, room);
+          startFlip7TurnTimer(io, room);
+        }
+      }, 2000);
+    });
+
+    socket.on('flip7:endGame', () => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.hostId !== socket.id) return;
+
+      const state = Flip7.getGameState(room.code);
+      if (state) {
+        state.phase = 'finished';
+      }
+      broadcastFlip7State(io, room);
+      Flip7.endGame(room.code);
+      room.phase = 'lobby';
+      room.currentGameId = null;
+      io.to(room.code).emit('hub:roomUpdated', room);
+    });
+
+    socket.on('flip7:rematch', () => {
+      const room = RoomManager.getRoomByPlayer(socket.id);
+      if (!room || room.hostId !== socket.id) return;
+
+      const oldState = Flip7.getGameState(room.code);
+      const settings = oldState?.settings;
+      Flip7.endGame(room.code);
+
+      room.phase = 'playing';
+      Flip7.createGame(room, settings);
+
+      io.to(room.code).emit('hub:roomUpdated', room);
+
+      // Deal after animation delay
+      setTimeout(() => {
+        const state = Flip7.getGameState(room.code);
+        if (state?.phase === 'dealing') {
+          Flip7.dealInitialCards(room.code, room);
+          broadcastFlip7State(io, room);
+          startFlip7TurnTimer(io, room);
+        }
+      }, 2000);
+
+      console.log(`[Game] Flip 7 rematch in ${room.code}`);
+    });
+
     // ---- Disconnect ----
 
     socket.on('disconnect', () => {
@@ -942,6 +1220,36 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
                 }, 10000);
                 disconnectGraceTimers.set(graceKey, graceTimer);
               }
+            }
+          }
+        }
+
+        if (room.currentGameId === 'flip7') {
+          const state = Flip7.getGameState(room.code);
+          if (state && state.phase === 'playing' && state.settings.mode === 'classic') {
+            const activeId = state.turnOrder[state.currentPlayerIndex];
+            if (activeId === socket.id) {
+              // Disconnected player's turn — grace period then auto-stay
+              const graceKey = `${room.code}:${socket.id}`;
+              const graceTimer = setTimeout(() => {
+                disconnectGraceTimers.delete(graceKey);
+                Flip7.clearRoomTimer(room.code);
+                const currentState = Flip7.getGameState(room.code);
+                if (!currentState || currentState.phase !== 'playing') return;
+
+                const result = Flip7.handleDisconnectedTurn(room.code);
+                if (result === 'roundEnd') {
+                  const roundResult = Flip7.endRound(room.code);
+                  if (roundResult) {
+                    io.to(room.code).emit('flip7:roundEnd', roundResult);
+                  }
+                }
+                broadcastFlip7State(io, room);
+                if (result === 'continue') {
+                  startFlip7TurnTimer(io, room);
+                }
+              }, 10000);
+              disconnectGraceTimers.set(graceKey, graceTimer);
             }
           }
         }
@@ -1281,4 +1589,94 @@ function startPokerTurnTimer(io: SocketIOServer, room: Room): void {
   }, 1000);
 
   Poker.setRoomTimer(room.code, interval);
+}
+
+// ---- Flip 7 Helpers ----
+
+function broadcastFlip7State(io: SocketIOServer, room: Room): void {
+  for (const pid of Object.keys(room.players)) {
+    if (room.players[pid].connected) {
+      const clientState = Flip7.getClientState(room.code, pid, room);
+      if (clientState) {
+        io.to(pid).emit('flip7:stateUpdated', clientState);
+      }
+    }
+  }
+}
+
+function startFlip7TurnTimer(io: SocketIOServer, room: Room): void {
+  const state = Flip7.getGameState(room.code);
+  if (!state || state.phase !== 'playing' || state.settings.turnTimer === 0) return;
+
+  Flip7.clearRoomTimer(room.code);
+
+  const turnEnd = Date.now() + state.settings.turnTimer * 1000;
+  state.turnTimerEnd = turnEnd;
+
+  const interval = setInterval(() => {
+    const currentState = Flip7.getGameState(room.code);
+    if (!currentState || currentState.phase !== 'playing' || !currentState.turnTimerEnd) {
+      Flip7.clearRoomTimer(room.code);
+      return;
+    }
+
+    const secondsLeft = Math.max(0, Math.ceil((currentState.turnTimerEnd - Date.now()) / 1000));
+    io.to(room.code).emit('flip7:turnTimer', secondsLeft);
+
+    if (secondsLeft <= 0) {
+      Flip7.clearRoomTimer(room.code);
+
+      if (currentState.settings.mode === 'classic') {
+        // Auto-stay for current player
+        const result = Flip7.handleDisconnectedTurn(room.code);
+        if (result === 'roundEnd') {
+          const roundResult = Flip7.endRound(room.code);
+          if (roundResult) {
+            io.to(room.code).emit('flip7:roundEnd', roundResult);
+          }
+        }
+        broadcastFlip7State(io, room);
+        if (result === 'continue') {
+          startFlip7TurnTimer(io, room);
+        }
+      } else {
+        // Chaos mode: auto-stay for anyone who hasn't submitted
+        const activePlayers = currentState.turnOrder.filter(id =>
+          currentState.playerData[id].roundStatus === 'active'
+        );
+        for (const pid of activePlayers) {
+          if (!currentState.chaosChoices || !currentState.chaosChoices[pid]) {
+            Flip7.chaosSubmit(room.code, pid, 'stay');
+          }
+        }
+        // Resolve
+        const chaosResult = Flip7.resolveChaos(room.code);
+        if (chaosResult) {
+          for (const r of chaosResult.results) {
+            if (r.choice === 'hit' && r.card) {
+              const player = room.players[r.playerId];
+              io.to(room.code).emit('flip7:cardFlipped', {
+                playerId: r.playerId,
+                playerName: player?.name || 'Unknown',
+                card: r.card,
+                result: r.result || 'safe',
+              });
+            }
+          }
+          if (chaosResult.roundEnd) {
+            const roundResult = Flip7.endRound(room.code);
+            if (roundResult) {
+              io.to(room.code).emit('flip7:roundEnd', roundResult);
+            }
+          }
+          broadcastFlip7State(io, room);
+          if (!chaosResult.roundEnd) {
+            startFlip7TurnTimer(io, room);
+          }
+        }
+      }
+    }
+  }, 1000);
+
+  Flip7.setRoomTimer(room.code, interval as unknown as ReturnType<typeof setTimeout>);
 }
