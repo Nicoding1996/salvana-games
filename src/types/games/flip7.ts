@@ -88,6 +88,8 @@ export interface Flip7PlayerInfo {
   connected: boolean;
   roundStatus: PlayerRoundStatus;
   cardCount: number;           // how many number cards they have
+  visibleCards: number[];      // actual card values (all cards are face-up in Flip 7)
+  bustCard: number | null;     // the duplicate value that caused bust (shown with red highlight)
   hasSecondChance: boolean;
   modifiers: ModifierCardKind[];
   cumulativeScore: number;
@@ -134,6 +136,7 @@ export interface Flip7ServerPlayerData {
   modifiers: ModifierCardKind[];
   secondChances: number;
   roundStatus: PlayerRoundStatus;
+  bustCard: NumberCard | null;  // the duplicate card that caused the bust
 }
 
 export interface Flip7ServerState {

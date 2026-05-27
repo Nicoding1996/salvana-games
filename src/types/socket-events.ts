@@ -106,6 +106,7 @@ export interface ServerToClientEvents {
   'flip7:cardFlipped': (data: { playerId: string; playerName: string; card: Flip7Card; result: 'safe' | 'bust' | 'secondChance' }) => void;
   'flip7:turnTimer': (secondsLeft: number) => void;
   'flip7:roundEnd': (data: { scores: { playerId: string; roundScore: number; cumulativeScore: number; busted: boolean }[]; winnerId: string | null; flipSevenBy: string | null }) => void;
+  'flip7:actionUsed': (data: { type: 'freeze' | 'flipThree'; byName: string; targetId: string; targetName: string }) => void;
 }
 
 // ---- Derived types for client state ----

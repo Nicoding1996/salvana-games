@@ -36,6 +36,12 @@ let _lastFlipEvent: {
   card: Card;
   result: 'safe' | 'bust' | 'secondChance';
 } | null = null;
+let _actionNotification: {
+  type: 'freeze' | 'flipThree';
+  byName: string;
+  targetId: string;
+  targetName: string;
+} | null = null;
 const _listeners = new Set<() => void>();
 let _socketBound = false;
 
@@ -61,16 +67,27 @@ function ensureSocketBound() {
   socket.on('flip7:cardFlipped', (event) => {
     _lastFlipEvent = event;
     notifyListeners();
-    // Clear after animation duration
+    // Clear after animation duration — longer for busts so player can see what happened
+    const duration = event.result === 'bust' ? 2500 : 1500;
     setTimeout(() => {
       _lastFlipEvent = null;
       notifyListeners();
-    }, 1500);
+    }, duration);
   });
 
   socket.on('flip7:turnTimer', (secondsLeft) => {
     _turnTimer = secondsLeft;
     notifyListeners();
+  });
+
+  socket.on('flip7:actionUsed', (data) => {
+    _actionNotification = data;
+    notifyListeners();
+    // Auto-dismiss after 3 seconds
+    setTimeout(() => {
+      _actionNotification = null;
+      notifyListeners();
+    }, 3000);
   });
 
   socket.on('flip7:roundEnd', (data) => {
@@ -94,6 +111,7 @@ export function useFlip7() {
   const [turnTimer, setTurnTimer] = useState<number | null>(_turnTimer);
   const [lastFlipEvent, setLastFlipEvent] = useState(_lastFlipEvent);
   const [chaosSubmitted, setChaosSubmitted] = useState(_chaosSubmitted);
+  const [actionNotification, setActionNotification] = useState(_actionNotification);
 
   useEffect(() => {
     ensureSocketBound();
@@ -103,6 +121,7 @@ export function useFlip7() {
       setTurnTimer(_turnTimer);
       setLastFlipEvent(_lastFlipEvent);
       setChaosSubmitted(_chaosSubmitted);
+      setActionNotification(_actionNotification);
     };
     _listeners.add(listener);
 
@@ -153,6 +172,7 @@ export function useFlip7() {
     turnTimer,
     lastFlipEvent,
     chaosSubmitted,
+    actionNotification,
     hit,
     stay,
     useAction,

@@ -60,14 +60,28 @@ export default function FlipAnimation({ card, result, playerName, isMe }: FlipAn
         {/* Result label */}
         <div className="text-center mt-3">
           {result === 'bust' && (
-            <p className="text-sm font-bold text-(--danger)">
-              {isMe ? '💀 BUST!' : `💀 ${playerName} busted!`}
-            </p>
+            <div>
+              <p className="text-sm font-bold text-(--danger)">
+                {isMe ? '💀 BUST!' : `💀 ${playerName} busted!`}
+              </p>
+              {card.type === 'number' && (
+                <p className="text-xs text-(--danger)/70 mt-0.5">
+                  Already had a {card.value}
+                </p>
+              )}
+            </div>
           )}
           {result === 'secondChance' && (
-            <p className="text-sm font-bold text-green-400">
-              💚 Second Chance!
-            </p>
+            <div>
+              <p className="text-sm font-bold text-green-400">
+                💚 Second Chance!
+              </p>
+              {card.type === 'number' && (
+                <p className="text-xs text-green-400/70 mt-0.5">
+                  Duplicate {card.value} discarded
+                </p>
+              )}
+            </div>
           )}
           {result === 'safe' && !isMe && (
             <p className="text-xs text-(--text-muted)">{playerName}</p>

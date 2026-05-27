@@ -3,9 +3,7 @@
 import { useState } from 'react';
 import { useFlip7 } from '@/lib/games/flip7/useFlip7';
 import type { useRoom } from '@/lib/hub/useRoom';
-import CardDisplay from './CardDisplay';
 import FlipAnimation from './FlipAnimation';
-import PlayerStatus from './PlayerStatus';
 import ActionSheet from './ActionSheet';
 import RoundSummary from './RoundSummary';
 import GameOver from './GameOver';
@@ -21,6 +19,7 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
     turnTimer,
     lastFlipEvent,
     chaosSubmitted,
+    actionNotification,
     hit,
     stay,
     useAction,
@@ -180,14 +179,30 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
         </div>
       </div>
 
-      {/* Player status row */}
-      <div className="px-2 py-1">
-        <PlayerStatus
-          players={players}
-          activePlayerId={activePlayerId}
-          myId={playerId || ''}
-        />
-      </div>
+      {/* Action notification toast */}
+      {actionNotification && (
+        <div className={`mx-4 mb-2 p-3 rounded-xl border text-center animate-slide-up ${
+          actionNotification.type === 'freeze'
+            ? 'bg-blue-500/10 border-blue-500/30'
+            : 'bg-yellow-500/10 border-yellow-500/30'
+        }`}>
+          {actionNotification.type === 'freeze' ? (
+            <p className="text-sm font-semibold text-blue-400">
+              ❄️ {actionNotification.targetId === playerId
+                ? `${actionNotification.byName} froze you!`
+                : `${actionNotification.byName} froze ${actionNotification.targetName}!`
+              }
+            </p>
+          ) : (
+            <p className="text-sm font-semibold text-yellow-400">
+              ⚡ {actionNotification.targetId === playerId
+                ? `${actionNotification.byName} forced you to draw 3!`
+                : `${actionNotification.byName} forced ${actionNotification.targetName} to draw 3!`
+              }
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Turn indicator */}
       <div className="text-center py-2">
@@ -205,46 +220,113 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
         )}
       </div>
 
-      {/* Activity log (when not my turn) */}
-      {!isMyTurn && settings.mode === 'classic' && activityLog.length > 0 && (
-        <div className="mx-4 mb-2 max-h-24 overflow-y-auto bg-(--bg-card) border border-(--border) rounded-xl p-3 space-y-1.5">
-          {activityLog.slice(-6).map((entry, i) => (
-            <div key={i} className="flex items-center gap-2 text-[11px]">
-              <span className="font-semibold text-(--text-primary) shrink-0">{entry.playerName}</span>
-              {entry.result === 'safe' && entry.card.type === 'number' && (
-                <span className="text-(--text-secondary)">
-                  drew <span className="font-bold text-(--game-accent)">{entry.card.value}</span> ✓
-                </span>
-              )}
-              {entry.result === 'bust' && (
-                <span className="text-(--danger) font-semibold">busted! 💀</span>
-              )}
-              {entry.result === 'secondChance' && (
-                <span className="text-green-400 font-semibold">saved by Second Chance! 💚</span>
-              )}
-              {entry.result === 'stayed' && (
-                <span className="text-(--text-muted)">stayed ✓</span>
-              )}
-              {entry.result === 'frozen' && (
-                <span className="text-blue-400">was frozen ❄️</span>
-              )}
+      {/* All players' hands — scrollable */}
+      <div className="flex-1 overflow-y-auto px-3 space-y-2 pb-2">
+        {/* Your hand (highlighted) */}
+        <div className={`rounded-xl border-2 p-3 ${
+          isMyTurn ? 'border-(--game-accent) bg-(--game-accent)/5' : 'border-(--border-light) bg-(--bg-card)'
+        }`}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">{myPlayer?.avatar}</span>
+              <span className="text-xs font-semibold text-(--text-primary)">You</span>
+              {myRoundStatus === 'busted' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--danger)/20 text-(--danger) font-bold">BUST</span>}
+              {myRoundStatus === 'stayed' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--text-muted)/20 text-(--text-muted) font-bold">STAYED</span>}
+              {myRoundStatus === 'frozen' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">FROZEN</span>}
             </div>
-          ))}
+            <span className="text-xs font-bold text-(--game-accent)">
+              +{myCards.reduce((s, c) => s + c.value, 0) + myModifiers.reduce((s, m) => m === 'plus2' ? s + 2 : m === 'plus4' ? s + 4 : s, 0)} this round
+            </span>
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            {myCards.map((card, i) => {
+              const val = card.value;
+              return (
+                <div key={i} className="w-11 h-14 rounded-lg flex flex-col items-center justify-center shadow-sm" style={{
+                  backgroundColor: val <= 2 ? '#fef3c7' : val <= 5 ? '#ecfdf5' : val <= 8 ? '#eff6ff' : val <= 10 ? '#f5f3ff' : '#fdf2f8',
+                  border: `1.5px solid ${val <= 2 ? '#f59e0b' : val <= 5 ? '#10b981' : val <= 8 ? '#3b82f6' : val <= 10 ? '#8b5cf6' : '#ec4899'}`,
+                }}>
+                  <span className="text-base font-bold" style={{ color: val <= 2 ? '#92400e' : val <= 5 ? '#065f46' : val <= 8 ? '#1e40af' : val <= 10 ? '#5b21b6' : '#9d174d' }}>{val}</span>
+                  <span className="text-[7px]" style={{ color: val <= 2 ? '#f59e0b' : val <= 5 ? '#10b981' : val <= 8 ? '#3b82f6' : val <= 10 ? '#8b5cf6' : '#ec4899' }}>pts</span>
+                </div>
+              );
+            })}
+            {/* Show bust card with red highlight */}
+            {myRoundStatus === 'busted' && myPlayer?.bustCard !== null && myPlayer?.bustCard !== undefined && (
+              <div className="w-11 h-14 rounded-lg flex flex-col items-center justify-center shadow-sm bg-red-100 border-2 border-red-500">
+                <span className="text-base font-bold text-red-600">{myPlayer.bustCard}</span>
+                <span className="text-[7px] text-red-400">💀</span>
+              </div>
+            )}
+            {myModifiers.map((mod, i) => (
+              <div key={`m${i}`} className="w-11 h-14 rounded-lg flex items-center justify-center shadow-sm bg-(--bg-elevated) border border-(--game-accent)/40">
+                <span className="text-sm font-bold text-(--game-accent)">{mod === 'plus2' ? '+2' : mod === 'plus4' ? '+4' : '×2'}</span>
+              </div>
+            ))}
+            {mySecondChances > 0 && (
+              <div className="w-11 h-14 rounded-lg flex items-center justify-center shadow-sm bg-(--bg-elevated) border border-green-500/40">
+                <span className="text-sm">💚</span>
+              </div>
+            )}
+            {myCards.length === 0 && myRoundStatus === 'active' && (
+              <span className="text-[10px] text-(--text-muted) py-2">Waiting for cards...</span>
+            )}
+          </div>
         </div>
-      )}
 
-      {/* Card display */}
-      <div className="flex-1 px-4 flex flex-col justify-center min-h-[200px]">
-        <CardDisplay
-          cards={myCards}
-          modifiers={myModifiers}
-          secondChances={mySecondChances}
-          roundStatus={myRoundStatus}
-        />
+        {/* Other players' hands */}
+        {players.filter(p => p.id !== playerId).map(p => {
+          const isActive = p.id === activePlayerId;
+          return (
+            <div key={p.id} className={`rounded-xl border p-3 ${
+              isActive ? 'border-(--game-accent)/50 bg-(--game-accent)/5' : 'border-(--border) bg-(--bg-card)/50'
+            } ${p.roundStatus === 'busted' ? 'opacity-50' : ''}`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">{p.avatar}</span>
+                  <span className="text-xs font-semibold text-(--text-primary)">{p.name}</span>
+                  {p.roundStatus === 'busted' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--danger)/20 text-(--danger) font-bold">BUST</span>}
+                  {p.roundStatus === 'stayed' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--text-muted)/20 text-(--text-muted) font-bold">STAYED</span>}
+                  {p.roundStatus === 'frozen' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">FROZEN</span>}
+                </div>
+                <span className="text-[10px] font-semibold text-(--text-secondary)">
+                  +{(p.visibleCards || []).reduce((s: number, v: number) => s + v, 0)} this round
+                  <span className="text-(--text-muted) ml-1">{p.cumulativeScore} pts</span>
+                </span>
+              </div>
+              <div className="flex gap-1 flex-wrap">
+                {(p.visibleCards || []).map((val, i) => (
+                  <div key={i} className="w-9 h-12 rounded-md flex flex-col items-center justify-center" style={{
+                    backgroundColor: val <= 2 ? '#fef3c7' : val <= 5 ? '#ecfdf5' : val <= 8 ? '#eff6ff' : val <= 10 ? '#f5f3ff' : '#fdf2f8',
+                    border: `1px solid ${val <= 2 ? '#f59e0b' : val <= 5 ? '#10b981' : val <= 8 ? '#3b82f6' : val <= 10 ? '#8b5cf6' : '#ec4899'}`,
+                  }}>
+                    <span className="text-sm font-bold" style={{ color: val <= 2 ? '#92400e' : val <= 5 ? '#065f46' : val <= 8 ? '#1e40af' : val <= 10 ? '#5b21b6' : '#9d174d' }}>{val}</span>
+                    <span className="text-[6px]" style={{ color: val <= 2 ? '#f59e0b' : val <= 5 ? '#10b981' : val <= 8 ? '#3b82f6' : val <= 10 ? '#8b5cf6' : '#ec4899' }}>pts</span>
+                  </div>
+                ))}
+                {/* Show bust card with red highlight */}
+                {p.roundStatus === 'busted' && p.bustCard !== null && p.bustCard !== undefined && (
+                  <div className="w-9 h-12 rounded-md flex flex-col items-center justify-center bg-red-100 border-2 border-red-500">
+                    <span className="text-sm font-bold text-red-600">{p.bustCard}</span>
+                    <span className="text-[6px] text-red-400">💀</span>
+                  </div>
+                )}
+                {(p.modifiers || []).map((mod, i) => (
+                  <div key={`m${i}`} className="w-9 h-12 rounded-md flex items-center justify-center bg-(--bg-elevated) border border-(--game-accent)/30">
+                    <span className="text-[10px] font-bold text-(--game-accent)">{mod === 'plus2' ? '+2' : mod === 'plus4' ? '+4' : '×2'}</span>
+                  </div>
+                ))}
+                {(p.visibleCards?.length ?? 0) === 0 && p.roundStatus === 'active' && (
+                  <span className="text-[9px] text-(--text-muted) py-1">No cards yet</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Flip animation overlay — shows on top of everything including phase transitions */}
-      {lastFlipEvent && (
+      {/* Flip animation overlay — shows on top of everything (but not during pending actions) */}
+      {lastFlipEvent && !pendingAction && (
         <FlipAnimation
           card={lastFlipEvent.card}
           result={lastFlipEvent.result}

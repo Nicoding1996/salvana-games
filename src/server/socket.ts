@@ -925,6 +925,7 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
 
       if (result.type === 'freeze') {
         const targetPlayer = room.players[data.targetId];
+        const drawerPlayer = room.players[socket.id];
         Flip7.addActivityLog(room.code, {
           playerId: data.targetId,
           playerName: targetPlayer?.name || 'Unknown',
@@ -932,6 +933,41 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
           result: 'frozen',
           timestamp: Date.now(),
         });
+        // Notify all players about the action
+        io.to(room.code).emit('flip7:actionUsed', {
+          type: 'freeze',
+          byName: drawerPlayer?.name || 'Unknown',
+          targetId: data.targetId,
+          targetName: targetPlayer?.name || 'Unknown',
+        });
+      }
+
+      if (result.type === 'flipThree' && result.flipThreeResults) {
+        const targetPlayer = room.players[data.targetId];
+        const drawerPlayer = room.players[socket.id];
+        // Notify all players about the action
+        io.to(room.code).emit('flip7:actionUsed', {
+          type: 'flipThree',
+          byName: drawerPlayer?.name || 'Unknown',
+          targetId: data.targetId,
+          targetName: targetPlayer?.name || 'Unknown',
+        });
+        // Log each card drawn for the target
+        for (const r of result.flipThreeResults) {
+          io.to(room.code).emit('flip7:cardFlipped', {
+            playerId: data.targetId,
+            playerName: targetPlayer?.name || 'Unknown',
+            card: r.card,
+            result: r.result,
+          });
+          Flip7.addActivityLog(room.code, {
+            playerId: data.targetId,
+            playerName: targetPlayer?.name || 'Unknown',
+            card: r.card,
+            result: r.result,
+            timestamp: Date.now(),
+          });
+        }
       }
 
       if (result.turnResult === 'roundEnd') {
@@ -960,8 +996,9 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       const result = Flip7.giveModifier(room.code, socket.id, data.targetId);
       if (result === null) return;
 
-      // Modifier choice doesn't end turn — just broadcast updated state
+      // Modifier choice doesn't end turn — broadcast state and restart timer
       broadcastFlip7State(io, room);
+      startFlip7TurnTimer(io, room);
     });
 
     socket.on('flip7:chaosChoice', (data) => {

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import type { Flip7PlayerInfo, ModifierCardKind } from '@/types/games/flip7';
 import { ACTION_CARD_LABELS, MODIFIER_CARD_LABELS } from '@/types/games/flip7';
 
@@ -18,10 +19,15 @@ export default function ActionSheet({
 }: ActionSheetProps) {
   const targetPlayers = players.filter(p => eligibleTargets.includes(p.id));
 
-  // Auto-select if only one target
-  if (type === 'action' && targetPlayers.length === 1) {
-    // Will auto-fire on mount — but let's show briefly for UX
-  }
+  // Auto-select if only one target (after brief delay so player sees what's happening)
+  useEffect(() => {
+    if (type === 'action' && targetPlayers.length === 1) {
+      const timer = setTimeout(() => {
+        onSelect(targetPlayers[0].id);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [type, targetPlayers, onSelect]);
 
   const getHeader = () => {
     if (type === 'action') {
