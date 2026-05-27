@@ -81,7 +81,7 @@ export const GAME_REGISTRY: GameDefinition[] = [
     minPlayers: 2,
     maxPlayers: 6,
     duration: '10–15 min',
-    difficulty: 'casual',
+    difficulty: 'moderate',
     categories: ['bluffing', 'free-for-all', 'elimination'],
     isTeamGame: false,
     accentColor: '--game-accent',
@@ -186,7 +186,7 @@ export const CATEGORY_INFO: Record<GameCategory, { label: string; emoji: string 
 
 /** Get difficulty display info */
 export const DIFFICULTY_INFO: Record<GameDifficulty, { label: string; color: string }> = {
-  casual: { label: 'Easy to learn', color: '#5ee89e' },
-  moderate: { label: 'Some strategy', color: '#f0a050' },
-  strategic: { label: 'Think ahead', color: '#e74c3c' },
+  casual: { label: 'Easy', color: '#5ee89e' },
+  moderate: { label: 'Medium', color: '#f0a050' },
+  strategic: { label: 'Hard', color: '#e74c3c' },
 };
