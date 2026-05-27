@@ -101,14 +101,13 @@ function advanceTurn(state: Flip7ServerState): 'continue' | 'roundEnd' {
   do {
     state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.turnOrder.length;
     attempts++;
-  } while (
-    state.playerData[state.turnOrder[state.currentPlayerIndex]].roundStatus !== 'active' &&
-    attempts < state.turnOrder.length
-  );
+    if (state.playerData[state.turnOrder[state.currentPlayerIndex]].roundStatus === 'active') {
+      return 'continue';
+    }
+  } while (attempts < state.turnOrder.length);
 
-  if (attempts >= state.turnOrder.length) return 'roundEnd';
-
-  return 'continue';
+  // Should never reach here if activePlayers.length > 0, but safety fallback
+  return 'roundEnd';
 }
 
 // ---- Helper: calculate round score ----
@@ -116,21 +115,21 @@ function advanceTurn(state: Flip7ServerState): 'continue' | 'roundEnd' {
 function calculateRoundScore(playerData: Flip7ServerPlayerData, isFlip7: boolean): number {
   if (playerData.roundStatus === 'busted') return 0;
 
-  // Sum number card values
+  // 1. Sum number card values
   let base = playerData.numberCards.reduce((sum, card) => sum + card.value, 0);
 
-  // Add additive modifiers
+  // 2. Apply multiplicative modifiers FIRST (each ×2 doubles the number card sum)
+  const times2Count = playerData.modifiers.filter(m => m === 'times2').length;
+  base *= Math.pow(2, times2Count);
+
+  // 3. THEN add additive modifiers (not multiplied)
   for (const mod of playerData.modifiers) {
     if (mod === 'plus2') base += 2;
     if (mod === 'plus4') base += 4;
   }
 
-  // Add Flip 7 bonus
+  // 4. THEN add Flip 7 bonus (not multiplied)
   if (isFlip7) base += FLIP_7_BONUS;
-
-  // Apply multiplicative modifiers (each ×2 doubles)
-  const times2Count = playerData.modifiers.filter(m => m === 'times2').length;
-  base *= Math.pow(2, times2Count);
 
   return base;
 }
@@ -340,6 +339,9 @@ export function hit(roomCode: string, playerId: string): HitResult | null {
   const state = games.get(roomCode);
   if (!state || state.phase !== 'playing') return null;
 
+  // Block all actions if Flip 7 was achieved (round is ending)
+  if (state.flipSevenAchievedBy) return null;
+
   // Validate it's this player's turn (classic mode)
   if (state.settings.mode === 'classic') {
     const currentPlayerId = state.turnOrder[state.currentPlayerIndex];
@@ -420,6 +422,9 @@ export function hit(roomCode: string, playerId: string): HitResult | null {
 export function stay(roomCode: string, playerId: string): 'continue' | 'roundEnd' | null {
   const state = games.get(roomCode);
   if (!state || state.phase !== 'playing') return null;
+
+  // Block all actions if Flip 7 was achieved (round is ending)
+  if (state.flipSevenAchievedBy) return null;
 
   // Validate turn (classic mode)
   if (state.settings.mode === 'classic') {
@@ -625,20 +630,15 @@ export function endRound(roomCode: string): RoundEndResult | null {
   if (qualifiers.length === 1) {
     winnerId = qualifiers[0].playerId;
   } else if (qualifiers.length > 1) {
-    // Tiebreaker: highest cumulative
+    // Multiple players over target — check if one is clearly ahead
     qualifiers.sort((a, b) => b.cumulativeScore - a.cumulativeScore);
     if (qualifiers[0].cumulativeScore > qualifiers[1].cumulativeScore) {
+      // One player has the highest score — they win
       winnerId = qualifiers[0].playerId;
     } else {
-      // Second tiebreaker: highest round score
-      const tied = qualifiers.filter(q => q.cumulativeScore === qualifiers[0].cumulativeScore);
-      tied.sort((a, b) => b.roundScore - a.roundScore);
-      if (tied[0].roundScore > tied[1].roundScore) {
-        winnerId = tied[0].playerId;
-      } else {
-        // Co-winners — pick first (or could declare all tied as co-winners)
-        winnerId = tied[0].playerId;
-      }
+      // Tied at the top — per official rules, keep playing until one player is ahead
+      // Don't declare a winner, game continues with more rounds
+      winnerId = null;
     }
   }
 
@@ -890,6 +890,7 @@ export function setRoomTimer(roomCode: string, timer: ReturnType<typeof setTimeo
 export function clearRoomTimer(roomCode: string): void {
   const existing = activeTimers.get(roomCode);
   if (existing) {
+    clearInterval(existing);
     clearTimeout(existing);
     activeTimers.delete(roomCode);
   }

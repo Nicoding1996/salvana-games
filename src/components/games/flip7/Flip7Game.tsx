@@ -235,11 +235,19 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
               {myRoundStatus === 'frozen' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">FROZEN</span>}
             </div>
             <span className="text-xs font-bold text-(--game-accent)">
-              +{myCards.reduce((s, c) => s + c.value, 0) + myModifiers.reduce((s, m) => m === 'plus2' ? s + 2 : m === 'plus4' ? s + 4 : s, 0)} this round
+              +{(() => {
+                if (myRoundStatus === 'busted') return 0;
+                let base = myCards.reduce((s, c) => s + c.value, 0);
+                const times2 = myModifiers.filter(m => m === 'times2').length;
+                base *= Math.pow(2, times2);
+                base += myModifiers.reduce((s, m) => m === 'plus2' ? s + 2 : m === 'plus4' ? s + 4 : s, 0);
+                return base;
+              })()} this round
             </span>
           </div>
           <div className="flex gap-1.5 flex-wrap">
-            {myCards.map((card, i) => {
+            {/* Number cards first (sorted by value) */}
+            {[...myCards].sort((a, b) => a.value - b.value).map((card, i) => {
               const val = card.value;
               return (
                 <div key={i} className="w-11 h-14 rounded-lg flex flex-col items-center justify-center shadow-sm" style={{
@@ -290,12 +298,20 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
                   {p.roundStatus === 'frozen' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">FROZEN</span>}
                 </div>
                 <span className="text-[10px] font-semibold text-(--text-secondary)">
-                  +{(p.visibleCards || []).reduce((s: number, v: number) => s + v, 0)} this round
+                  +{(() => {
+                    if (p.roundStatus === 'busted') return 0;
+                    let base = (p.visibleCards || []).reduce((s: number, v: number) => s + v, 0);
+                    const times2 = (p.modifiers || []).filter((m: string) => m === 'times2').length;
+                    base *= Math.pow(2, times2);
+                    base += (p.modifiers || []).reduce((s: number, m: string) => m === 'plus2' ? s + 2 : m === 'plus4' ? s + 4 : s, 0);
+                    return base;
+                  })()} this round
                   <span className="text-(--text-muted) ml-1">{p.cumulativeScore} pts</span>
                 </span>
               </div>
               <div className="flex gap-1 flex-wrap">
-                {(p.visibleCards || []).map((val, i) => (
+                {/* Number cards sorted by value */}
+                {[...(p.visibleCards || [])].sort((a, b) => a - b).map((val, i) => (
                   <div key={i} className="w-9 h-12 rounded-md flex flex-col items-center justify-center" style={{
                     backgroundColor: val <= 2 ? '#fef3c7' : val <= 5 ? '#ecfdf5' : val <= 8 ? '#eff6ff' : val <= 10 ? '#f5f3ff' : '#fdf2f8',
                     border: `1px solid ${val <= 2 ? '#f59e0b' : val <= 5 ? '#10b981' : val <= 8 ? '#3b82f6' : val <= 10 ? '#8b5cf6' : '#ec4899'}`,
