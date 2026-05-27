@@ -71,7 +71,7 @@ export default function Home() {
           Salvana <span className="text-(--brand)">Games</span>
         </h1>
         <p className="text-(--text-secondary) text-sm mt-2.5 max-w-[280px] mx-auto leading-relaxed">
-          Party games that run in your browser. One person creates a room, everyone else joins on their phone.
+          Grab your phones. Pick a game. Bluff, bet, and betray your friends — all from the browser.
         </p>
       </div>
 
