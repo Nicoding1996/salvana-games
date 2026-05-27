@@ -13,7 +13,7 @@ export type BattleshipPhase =
 
 export interface BattleshipSettings {
   maxPlayers: number;          // 2–4
-  gridSize: 7 | 8;
+  gridSize: 8 | 10;
   shotMode: 'salvo' | 'classic'; // salvo = shots equal surviving ships, classic = 1 per turn
   sonarPing: boolean;
   turnTimer: 15 | 30 | 45 | 0;  // seconds, 0 = off
@@ -22,7 +22,7 @@ export interface BattleshipSettings {
 
 export const DEFAULT_BATTLESHIP_SETTINGS: BattleshipSettings = {
   maxPlayers: 4,
-  gridSize: 7,
+  gridSize: 8,
   shotMode: 'classic',
   sonarPing: false,
   turnTimer: 30,
@@ -154,5 +154,5 @@ export interface BattleshipServerState {
 
 // ---- Constants ----
 
-export const GRID_LABELS_COL = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-export const GRID_LABELS_ROW = ['1', '2', '3', '4', '5', '6', '7', '8'];
+export const GRID_LABELS_COL = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+export const GRID_LABELS_ROW = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];

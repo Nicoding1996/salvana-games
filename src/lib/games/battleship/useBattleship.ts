@@ -19,7 +19,7 @@ const initialState: BattleshipClientState = {
   settings: DEFAULT_BATTLESHIP_SETTINGS,
   lastTurnSummary: null,
   sonarUsed: false,
-  gridSize: 7,
+  gridSize: 8,
   isFirstRound: true,
 };
 

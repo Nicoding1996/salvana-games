@@ -500,7 +500,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-(--text-secondary)">Grid Size</span>
             <div className="flex gap-1.5">
-              {([7, 8] as const).map((n) => (
+              {([8, 10] as const).map((n) => (
                 <button
                   key={n}
                   onClick={() => setBattleshipSettings(s => ({ ...s, gridSize: n }))}
