@@ -333,6 +333,13 @@ input, textarea, select { font-size: 16px !important; }
 }
 .animate-player-join { animation: playerJoinPop 0.35s cubic-bezier(0.22, 1, 0.36, 1); }
 
+/* Rules sheet slide-up */
+@keyframes rulesSheetEnter {
+  0% { transform: translateY(100%); }
+  100% { transform: translateY(0); }
+}
+.rules-sheet-enter { animation: rulesSheetEnter 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+
 /* ============================================
    Game Preview Animations (Lobby card expansion)
    ============================================ */

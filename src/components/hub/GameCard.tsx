@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { GameDefinition } from '@/lib/gameRegistry';
 import { DIFFICULTY_INFO } from '@/lib/gameRegistry';
+import RulesSheet from '@/components/shared/RulesSheet';
 
 /* ============================================
    GameSelector — Horizontal pill strip + detail panel
@@ -18,16 +19,13 @@ interface GameSelectorProps {
 }
 
 export function GameSelector({ games, selectedGameId, isHost, playerCount, onSelect }: GameSelectorProps) {
-  const [showDetail, setShowDetail] = useState(false);
+  const [showRules, setShowRules] = useState(false);
   const selectedGame = games.find(g => g.id === selectedGameId) || games[0];
 
   const handlePillTap = (gameId: string) => {
     if (!isHost) return;
-    if (gameId === selectedGameId) {
-      setShowDetail(!showDetail);
-    } else {
+    if (gameId !== selectedGameId) {
       onSelect(gameId);
-      setShowDetail(false);
     }
   };
 
@@ -81,12 +79,11 @@ export function GameSelector({ games, selectedGameId, isHost, playerCount, onSel
         })}
       </div>
 
-      {/* Selected game info bar — tappable to expand details */}
+      {/* Selected game info bar — tappable to show rules */}
       <button
-        onClick={() => isHost ? setShowDetail(!showDetail) : setShowDetail(!showDetail)}
+        onClick={() => setShowRules(true)}
         className="mt-2 w-full flex items-center gap-2 text-[10px] text-(--text-muted) py-1 active:opacity-70 transition-opacity"
-        aria-label={showDetail ? 'Hide game details' : 'Show game details'}
-        aria-expanded={showDetail}
+        aria-label="Show game rules"
       >
         <span>{selectedGame.minPlayers}–{selectedGame.maxPlayers} players</span>
         <span>·</span>
@@ -96,7 +93,7 @@ export function GameSelector({ games, selectedGameId, isHost, playerCount, onSel
           {DIFFICULTY_INFO[selectedGame.difficulty].label}
         </span>
         <span className="ml-auto text-[9px] text-(--text-muted) underline underline-offset-2 decoration-dotted">
-          {showDetail ? 'hide' : 'how to play'}
+          how to play
         </span>
       </button>
 
@@ -108,15 +105,9 @@ export function GameSelector({ games, selectedGameId, isHost, playerCount, onSel
         </div>
       )}
 
-      {/* Expandable detail panel — quick rules */}
-      {showDetail && (
-        <div className="mt-2 p-3 rounded-xl bg-(--bg-card) border border-(--border) animate-fade-in">
-          <p className="text-xs text-(--text-primary) leading-relaxed">{selectedGame.howToPlay}</p>
-          <div className="flex items-center gap-3 mt-2.5 pt-2 border-t border-(--border)">
-            <span className="text-[10px] text-(--text-muted)">👥 Best with {selectedGame.bestWith}</span>
-            <span className="text-[10px] text-(--text-muted)">⏱ {selectedGame.duration}</span>
-          </div>
-        </div>
+      {/* Rules Sheet */}
+      {showRules && (
+        <RulesSheet gameId={selectedGame.id} onClose={() => setShowRules(false)} />
       )}
     </div>
   );
