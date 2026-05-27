@@ -49,11 +49,27 @@ function notifyListeners() {
   _listeners.forEach((fn) => fn());
 }
 
+function resetState() {
+  _gameState = initialState;
+  _turnTimer = null;
+  _chaosSubmitted = false;
+  _lastFlipEvent = null;
+  _actionNotification = null;
+  notifyListeners();
+}
+
 function ensureSocketBound() {
   if (_socketBound) return;
   _socketBound = true;
 
   const socket = getSocket();
+
+  // Clear flip7 state when room switches away from flip7
+  socket.on('hub:roomUpdated', (room: { currentGameId?: string | null; phase?: string }) => {
+    if (_gameState !== initialState && room.currentGameId !== 'flip7') {
+      resetState();
+    }
+  });
 
   socket.on('flip7:stateUpdated', (state) => {
     _gameState = state;

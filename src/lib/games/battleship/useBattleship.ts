@@ -36,6 +36,15 @@ function notifyListeners() {
   _listeners.forEach((fn) => fn());
 }
 
+function resetState() {
+  _gameState = initialState;
+  _turnTimer = null;
+  _placementTimer = null;
+  _shotResult = null;
+  _sonarResult = null;
+  notifyListeners();
+}
+
 function ensureSocketBound() {
   if (_socketBound) return;
   _socketBound = true;
@@ -45,6 +54,13 @@ function ensureSocketBound() {
   socket.on('battleship:stateUpdated', (state: BattleshipClientState) => {
     _gameState = state;
     notifyListeners();
+  });
+
+  // Clear battleship state when room switches away from battleship
+  socket.on('hub:roomUpdated', (room: { currentGameId?: string | null; phase?: string }) => {
+    if (_gameState !== initialState && room.currentGameId !== 'battleship') {
+      resetState();
+    }
   });
 
   socket.on('battleship:turnTimer', (secondsLeft: number) => {

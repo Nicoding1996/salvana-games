@@ -19,6 +19,15 @@ function notify() {
   for (const fn of _listeners) fn();
 }
 
+function resetState() {
+  _state = null;
+  _showdown = null;
+  _superlatives = [];
+  _turnTimer = null;
+  _reactions = [];
+  notify();
+}
+
 function ensureSocketBound() {
   if (_bound) return;
   _bound = true;
@@ -32,6 +41,13 @@ function ensureSocketBound() {
       _showdown = null;
     }
     notify();
+  });
+
+  // Clear poker state when room switches away from poker
+  socket.on('hub:roomUpdated', (room: { currentGameId?: string | null; phase?: string }) => {
+    if (_state && room.currentGameId !== 'poker') {
+      resetState();
+    }
   });
 
   socket.on('poker:showdown', (result: ShowdownResult) => {

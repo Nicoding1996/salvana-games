@@ -32,11 +32,26 @@ function notifyListeners() {
   _listeners.forEach((fn) => fn());
 }
 
+function resetState() {
+  _gameState = initialState;
+  _myDice = [];
+  _turnTimer = null;
+  _challengeResult = null;
+  notifyListeners();
+}
+
 function ensureSocketBound() {
   if (_socketBound) return;
   _socketBound = true;
 
   const socket = getSocket();
+
+  // Clear liars-dice state when room switches away from liars-dice
+  socket.on('hub:roomUpdated', (room: { currentGameId?: string | null; phase?: string }) => {
+    if (_gameState !== initialState && room.currentGameId !== 'liars-dice') {
+      resetState();
+    }
+  });
 
   socket.on('liars-dice:stateUpdated', (state) => {
     _gameState = state;

@@ -40,12 +40,26 @@ function notifyListeners() {
   _listeners.forEach((fn) => fn());
 }
 
+function resetState() {
+  _gameState = initialState;
+  _timerSeconds = null;
+  _lastVoteResult = null;
+  notifyListeners();
+}
+
 // Bind socket listeners once globally (not per component mount)
 function ensureSocketBound() {
   if (_socketBound) return;
   _socketBound = true;
 
   const socket = getSocket();
+
+  // Clear story-thief state when room switches away from story-thief
+  socket.on('hub:roomUpdated', (room: { currentGameId?: string | null; phase?: string }) => {
+    if (_gameState !== initialState && room.currentGameId !== 'story-thief') {
+      resetState();
+    }
+  });
 
   socket.on('story-thief:stateUpdated', (state) => {
     _gameState = state;
