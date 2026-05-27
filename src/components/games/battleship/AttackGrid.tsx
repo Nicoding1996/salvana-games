@@ -9,7 +9,6 @@ interface AttackGridProps {
   gameState: BattleshipClientState;
   myId: string;
   onFire: (targetId: string, coordinate: Coordinate) => void;
-  onEndTurn: () => void;
   onUseSonar: (targetId: string, topLeft: Coordinate) => void;
   shotResult: ShotEntry | null;
   sonarResult: { hasShip: boolean; topLeft: { row: number; col: number }; targetId: string } | null;
@@ -19,7 +18,6 @@ export default function AttackGrid({
   gameState,
   myId,
   onFire,
-  onEndTurn,
   onUseSonar,
   shotResult,
   sonarResult,
@@ -90,10 +88,6 @@ export default function AttackGrid({
     if (currentGrid[row][col] !== 'empty') return;
 
     onFire(selectedTarget, { row, col });
-  };
-
-  const handleEndTurn = () => {
-    onEndTurn();
   };
 
   const canFire = isMyTurn && shotsRemaining > 0;
@@ -313,14 +307,11 @@ export default function AttackGrid({
             </button>
           )}
 
-          {/* End turn button */}
+          {/* Auto-advancing indicator after all shots fired */}
           {allShotsFired && (
-            <button
-              onClick={handleEndTurn}
-              className="w-full py-3.5 bg-(--game-accent) text-white rounded-xl font-semibold active:scale-[0.97] transition-all animate-slide-up"
-            >
-              End Turn →
-            </button>
+            <div className="text-center py-3 animate-fade-in">
+              <p className="text-sm text-(--text-secondary)">⏳ Advancing...</p>
+            </div>
           )}
 
           {/* Shots counter */}

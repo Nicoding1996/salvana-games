@@ -257,6 +257,15 @@ export function getShotsForTurn(roomCode: string, playerId: string): number {
   return pd.ships.filter(s => !s.sunk).length;
 }
 
+export function getShotsRemainingForTurn(roomCode: string, playerId: string): number {
+  const state = games.get(roomCode);
+  if (!state) return 0;
+
+  const totalShots = getShotsForTurn(roomCode, playerId);
+  const shotsFired = state.lastTurnShots.filter(s => s.playerId === playerId).length;
+  return Math.max(0, totalShots - shotsFired);
+}
+
 export function endTurn(roomCode: string, room: Room): { gameOver: boolean; winnerId?: string } {
   const state = games.get(roomCode);
   if (!state || state.phase !== 'battle') return { gameOver: false };

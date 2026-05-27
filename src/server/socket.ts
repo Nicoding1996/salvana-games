@@ -668,6 +668,34 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         }
       }
 
+      // Auto-advance turn when all shots are fired (only counts actual shots, not sonar/abilities)
+      const shotsRemaining = Battleship.getShotsRemainingForTurn(room.code, socket.id);
+      if (shotsRemaining === 0) {
+        // Brief delay so player sees their last shot result before turn advances
+        setTimeout(() => {
+          const currentRoom = RoomManager.getRoom(room.code);
+          if (!currentRoom || currentRoom.currentGameId !== 'battleship') return;
+          const currentState = Battleship.getGameState(room.code);
+          if (!currentState || currentState.phase !== 'battle') return;
+          // Verify it's still this player's turn (hasn't already been ended)
+          if (currentState.turnOrder[currentState.currentPlayerIndex] !== socket.id) return;
+
+          Battleship.clearRoomTimer(room.code);
+          const { gameOver } = Battleship.endTurn(room.code, currentRoom);
+          broadcastBattleshipState(io, currentRoom);
+
+          if (gameOver) {
+            currentRoom.phase = 'finished';
+            io.to(room.code).emit('hub:roomUpdated', currentRoom);
+          } else {
+            startBattleshipTurnTimer(io, currentRoom);
+          }
+        }, 1200);
+        // Broadcast current state immediately so player sees last shot result
+        broadcastBattleshipState(io, room);
+        return;
+      }
+
       broadcastBattleshipState(io, room);
     });
 

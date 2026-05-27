@@ -24,7 +24,6 @@ export default function BattleshipGame({ roomHook }: BattleshipGameProps) {
     placeShips,
     autoPlace,
     fire,
-    endTurn,
     useSonar,
     endGame,
     rematch,
@@ -189,7 +188,6 @@ export default function BattleshipGame({ roomHook }: BattleshipGameProps) {
           gameState={gameState}
           myId={pid}
           onFire={fire}
-          onEndTurn={endTurn}
           onUseSonar={useSonar}
           shotResult={shotResult}
           sonarResult={sonarResult}

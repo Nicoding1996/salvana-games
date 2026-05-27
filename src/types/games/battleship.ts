@@ -23,7 +23,7 @@ export interface BattleshipSettings {
 export const DEFAULT_BATTLESHIP_SETTINGS: BattleshipSettings = {
   maxPlayers: 4,
   gridSize: 7,
-  shotMode: 'salvo',
+  shotMode: 'classic',
   sonarPing: false,
   turnTimer: 30,
   placementTimer: 60,
