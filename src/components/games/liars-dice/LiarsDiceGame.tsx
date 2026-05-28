@@ -5,11 +5,12 @@ import { useLiarsDice } from '@/lib/games/liars-dice/useLiarsDice';
 import type { useRoom } from '@/lib/hub/useRoom';
 import PlayerRing from './PlayerRing';
 import DiceDisplay from './DiceDisplay';
+import DiceIcon from './DiceIcon';
 import BidGrid from './BidGrid';
 import BidHistory from './BidHistory';
 import RevealPhase from './RevealPhase';
 import GameOver from './GameOver';
-import { DIE_FACE_LABELS, LIVES_DISPLAY } from '@/types/games/liars-dice';
+import { LIVES_DISPLAY } from '@/types/games/liars-dice';
 
 interface LiarsDiceGameProps {
   roomHook: ReturnType<typeof useRoom>;
@@ -170,10 +171,12 @@ export default function LiarsDiceGame({ roomHook }: LiarsDiceGameProps) {
         <div className="mx-4 space-y-2">
           <div className="bg-(--bg-card) border border-(--border) rounded-xl p-3 text-center">
             <p className="text-[10px] uppercase tracking-wider text-(--text-muted) mb-1">Current Bid</p>
-            <p className="text-2xl font-bold text-(--text-primary)">
-              {currentBid.quantity} × {DIE_FACE_LABELS[currentBid.faceValue]}
-            </p>
-            <p className="text-xs text-(--text-secondary)">by {currentBid.playerName}</p>
+            <div className="flex items-center justify-center gap-2">
+              <span className="text-2xl font-bold text-(--text-primary)">{currentBid.quantity}</span>
+              <span className="text-lg text-(--text-muted)">×</span>
+              <DiceIcon value={currentBid.faceValue} size={32} />
+            </div>
+            <p className="text-xs text-(--text-secondary) mt-1">by {currentBid.playerName}</p>
           </div>
 
           {/* Tension meter — visible to all players */}

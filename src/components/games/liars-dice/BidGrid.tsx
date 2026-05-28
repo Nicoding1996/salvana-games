@@ -127,11 +127,16 @@ export default function BidGrid({
       )}
 
       {/* Step 1: Face selector — 6 big dice buttons */}
-      <div className="bg-(--bg-card) border border-(--border) rounded-2xl p-3">
-        <p className="text-[9px] uppercase tracking-wider text-(--text-muted) text-center mb-2">
-          {selectedFace ? 'Now pick quantity ↓' : 'Tap a face to bid'}
+      <div className="relative bg-(--bg-card) border border-(--border-light) rounded-2xl p-3 overflow-hidden">
+        {/* Accent top line — signals interactive area */}
+        <div
+          className="absolute top-0 left-0 right-0 h-[2px]"
+          style={{ background: 'linear-gradient(90deg, transparent, var(--game-accent), transparent)', opacity: 0.4 }}
+        />
+        <p className="text-[9px] uppercase tracking-wider text-(--text-secondary) text-center mb-2">
+          {selectedFace ? 'Now pick quantity ↓' : 'Choose face'}
         </p>
-        <div className="flex justify-center gap-2">
+        <div className="flex justify-center gap-1.5">
           {[1, 2, 3, 4, 5, 6].map(face => {
             const valid = isFaceValid(face);
             const isSelected = selectedFace === face;
@@ -143,9 +148,9 @@ export default function BidGrid({
                 disabled={!valid}
                 onClick={() => handleFaceSelect(face)}
                 className={`
-                  flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all
+                  flex flex-col items-center gap-0.5 p-1 rounded-xl transition-all
                   ${isSelected
-                    ? 'ring-2 ring-(--game-accent) bg-(--bg-elevated) scale-110'
+                    ? 'ring-2 ring-(--game-accent) bg-(--bg-elevated)'
                     : valid
                       ? 'active:scale-95 active:bg-(--bg-elevated)'
                       : 'opacity-20'
@@ -153,9 +158,9 @@ export default function BidGrid({
                 `}
                 aria-label={`Select face ${face}${!valid ? ' (invalid)' : ''}`}
               >
-                <DiceIcon value={face} size={44} highlighted={isSelected} />
+                <DiceIcon value={face} size={36} highlighted={isSelected} />
                 <span className={`text-[9px] font-medium ${
-                  isSelected ? 'text-(--game-accent)' : 'text-(--text-muted)'
+                  isSelected ? 'text-(--game-accent)' : 'text-(--text-secondary)'
                 }`}>
                   ×{matchCount}
                 </span>

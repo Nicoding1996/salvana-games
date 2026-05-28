@@ -131,9 +131,9 @@ export default function DiceDisplay({ dice, phase, wildOnes, onRollComplete, hig
     <div className="flex flex-col items-center gap-3">
       {/* Label with match count */}
       <div className="flex items-center gap-2">
-        <p className="text-[10px] uppercase tracking-wider text-(--text-muted)">Your Dice</p>
+        <p className="text-[9px] uppercase tracking-wider text-(--text-muted)/70">Your Dice</p>
         {highlightFace && matchCount > 0 && (
-          <span className="text-[10px] font-bold text-(--game-accent) bg-(--game-accent-dim) px-1.5 py-0.5 rounded">
+          <span className="text-[9px] font-bold text-(--game-accent) bg-(--game-accent-dim) px-1.5 py-0.5 rounded">
             {matchCount} match{matchCount !== 1 ? 'es' : ''}
           </span>
         )}
