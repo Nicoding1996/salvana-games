@@ -8,9 +8,10 @@ interface DiceDisplayProps {
   phase: string;
   wildOnes: boolean;
   onRollComplete: () => void;
+  highlightFace?: number | null; // face value to highlight (from current bid)
 }
 
-export default function DiceDisplay({ dice, phase, wildOnes, onRollComplete }: DiceDisplayProps) {
+export default function DiceDisplay({ dice, phase, wildOnes, onRollComplete, highlightFace }: DiceDisplayProps) {
   const [rolling, setRolling] = useState(false);
   const [rolled, setRolled] = useState(false);
   const [motionPermission, setMotionPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
@@ -113,10 +114,30 @@ export default function DiceDisplay({ dice, phase, wildOnes, onRollComplete }: D
   // Sort dice for display: group same values together
   const sortedDice = [...dice].sort((a, b) => a - b);
 
+  // Determine if a die should be highlighted based on current bid face
+  const shouldHighlight = (value: number): boolean => {
+    if (!highlightFace) return false;
+    if (value === highlightFace) return true;
+    if (wildOnes && value === 1 && highlightFace !== 1) return true;
+    return false;
+  };
+
+  // Count matching dice
+  const matchCount = highlightFace
+    ? sortedDice.filter(d => shouldHighlight(d)).length
+    : 0;
+
   return (
     <div className="flex flex-col items-center gap-3">
-      {/* Label */}
-      <p className="text-[10px] uppercase tracking-wider text-(--text-muted)">Your Dice</p>
+      {/* Label with match count */}
+      <div className="flex items-center gap-2">
+        <p className="text-[10px] uppercase tracking-wider text-(--text-muted)">Your Dice</p>
+        {highlightFace && matchCount > 0 && (
+          <span className="text-[10px] font-bold text-(--game-accent) bg-(--game-accent-dim) px-1.5 py-0.5 rounded">
+            {matchCount} match{matchCount !== 1 ? 'es' : ''}
+          </span>
+        )}
+      </div>
 
       {/* Dice tray */}
       <div
@@ -136,6 +157,7 @@ export default function DiceDisplay({ dice, phase, wildOnes, onRollComplete }: D
             size={52}
             hidden={isRollingPhase && !rolled}
             wild={wildOnes}
+            highlighted={shouldHighlight(value)}
             className={rolled && isRollingPhase ? 'animate-fade-in' : ''}
           />
         ))}

@@ -5,7 +5,7 @@ import { useLiarsDice } from '@/lib/games/liars-dice/useLiarsDice';
 import type { useRoom } from '@/lib/hub/useRoom';
 import PlayerRing from './PlayerRing';
 import DiceDisplay from './DiceDisplay';
-import BidPicker from './BidPicker';
+import BidGrid from './BidGrid';
 import BidHistory from './BidHistory';
 import RevealPhase from './RevealPhase';
 import GameOver from './GameOver';
@@ -162,17 +162,47 @@ export default function LiarsDiceGame({ roomHook }: LiarsDiceGameProps) {
 
       {/* Player ring */}
       <div className="px-2 py-2">
-        <PlayerRing players={players} activePlayerId={activePlayerId} myId={playerId} />
+        <PlayerRing players={players} activePlayerId={activePlayerId} myId={playerId} totalDiceOnTable={totalDiceOnTable} />
       </div>
 
-      {/* Current bid display */}
+      {/* Current bid display with tension */}
       {currentBid && phase === 'bidding' && (
-        <div className="mx-4 bg-(--bg-card) border border-(--border) rounded-xl p-3 text-center">
-          <p className="text-[10px] uppercase tracking-wider text-(--text-muted) mb-1">Current Bid</p>
-          <p className="text-2xl font-bold text-(--text-primary)">
-            {currentBid.quantity} × {DIE_FACE_LABELS[currentBid.faceValue]}
-          </p>
-          <p className="text-xs text-(--text-secondary)">by {currentBid.playerName}</p>
+        <div className="mx-4 space-y-2">
+          <div className="bg-(--bg-card) border border-(--border) rounded-xl p-3 text-center">
+            <p className="text-[10px] uppercase tracking-wider text-(--text-muted) mb-1">Current Bid</p>
+            <p className="text-2xl font-bold text-(--text-primary)">
+              {currentBid.quantity} × {DIE_FACE_LABELS[currentBid.faceValue]}
+            </p>
+            <p className="text-xs text-(--text-secondary)">by {currentBid.playerName}</p>
+          </div>
+
+          {/* Tension meter — visible to all players */}
+          {!isMyTurn && (
+            <div className="px-1">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[9px] uppercase tracking-wider text-(--text-muted)">Bid Tension</span>
+                <span className="text-[9px] text-(--text-muted)">
+                  {currentBid.quantity}/{totalDiceOnTable} dice claimed
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-(--bg-primary) overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${Math.min(1, currentBid.quantity / totalDiceOnTable) * 100}%`,
+                    background: currentBid.quantity / totalDiceOnTable < 0.4
+                      ? 'var(--success)'
+                      : currentBid.quantity / totalDiceOnTable < 0.7
+                        ? 'var(--game-secondary)'
+                        : 'var(--danger)',
+                    boxShadow: currentBid.quantity / totalDiceOnTable > 0.6
+                      ? '0 0 8px rgba(248, 113, 113, 0.5)'
+                      : 'none',
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -234,19 +264,22 @@ export default function LiarsDiceGame({ roomHook }: LiarsDiceGameProps) {
           phase={phase}
           wildOnes={settings.wildOnes}
           onRollComplete={rollComplete}
+          highlightFace={phase === 'bidding' && currentBid ? currentBid.faceValue : null}
         />
       </div>
 
-      {/* Bid picker (only on my turn) */}
+      {/* Bid grid (only on my turn) */}
       {isMyTurn && amAlive && phase === 'bidding' && (
         <div className="px-4 pb-4">
-          <BidPicker
+          <BidGrid
             currentBid={currentBid ? { quantity: currentBid.quantity, faceValue: currentBid.faceValue } : null}
             totalDiceOnTable={totalDiceOnTable}
             onPlaceBid={placeBid}
             onCallLiar={callLiar}
             onCallSpotOn={settings.spotOn ? callSpotOn : undefined}
             spotOnEnabled={settings.spotOn}
+            myDice={myDice}
+            wildOnes={settings.wildOnes}
           />
         </div>
       )}
