@@ -84,7 +84,7 @@ export default function FlipAnimation({ card, result, playerName, isMe }: FlipAn
             </div>
           )}
           {result === 'safe' && !isMe && (
-            <p className="text-xs text-(--text-muted)">{playerName}</p>
+            <p className="text-sm font-medium text-(--text-secondary)">{playerName}</p>
           )}
         </div>
       </div>
