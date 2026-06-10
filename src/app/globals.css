@@ -727,3 +727,111 @@ input, textarea, select { font-size: 16px !important; }
 .animate-slide-up {
   animation: flip7SlideUp 0.3s ease-out forwards;
 }
+
+/* --- Active turn glow ring (subtle breathing) --- */
+@keyframes flip7TurnPulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--game-accent), 0 0 6px rgba(163, 230, 53, 0.25); }
+  50% { box-shadow: 0 0 0 2px var(--game-accent), 0 0 16px rgba(163, 230, 53, 0.55); }
+}
+.flip7-turn-glow {
+  animation: flip7TurnPulse 1.8s ease-in-out infinite;
+}
+
+/* --- Action projectile fly-across (Freeze / Flip Three) --- */
+@keyframes flip7ActionFly {
+  0% { transform: translate(-42vw, 0) scale(0.4) rotate(-25deg); opacity: 0; }
+  15% { opacity: 1; }
+  60% { transform: translate(0, 0) scale(1.6) rotate(8deg); opacity: 1; }
+  78% { transform: translate(0, 0) scale(1.35) rotate(0deg); }
+  100% { transform: translate(0, 0) scale(1.45) rotate(0deg); opacity: 0; }
+}
+.flip7-action-fly {
+  animation: flip7ActionFly 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* --- Impact burst ring on action landing --- */
+@keyframes flip7ImpactBurst {
+  0% { transform: scale(0.2); opacity: 0.8; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+.flip7-impact-burst {
+  animation: flip7ImpactBurst 0.7s ease-out 0.45s forwards;
+}
+
+/* --- Action label fade-out --- */
+@keyframes flip7LabelOut {
+  0%, 65% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-6px); }
+}
+.flip7-label-out {
+  animation: flip7LabelOut 1.5s ease-out forwards;
+}
+
+/* --- Frost overlay for frozen players (persistent) --- */
+@keyframes flip7FrostIn {
+  0% { opacity: 0; backdrop-filter: blur(0px); }
+  100% { opacity: 1; backdrop-filter: blur(1px); }
+}
+.flip7-frost {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.18), rgba(191, 219, 254, 0.10));
+  border: 1px solid rgba(96, 165, 250, 0.45) !important;
+  animation: flip7FrostIn 0.5s ease-out forwards;
+}
+
+/* --- Full-screen frost reaction for the player who just got frozen --- */
+@keyframes flip7SelfFrostIn {
+  0% { opacity: 0; backdrop-filter: blur(0px); }
+  25% { opacity: 1; backdrop-filter: blur(2px); }
+  70% { opacity: 1; backdrop-filter: blur(2px); }
+  100% { opacity: 0; backdrop-filter: blur(0px); }
+}
+.flip7-self-frost {
+  background: radial-gradient(ellipse at center, transparent 42%, rgba(96, 165, 250, 0.22) 100%);
+  box-shadow: inset 0 0 120px 45px rgba(96, 165, 250, 0.5);
+  animation: flip7SelfFrostIn 2.2s ease-out forwards;
+}
+
+@keyframes flip7SelfFlakeLand {
+  0% { transform: scale(2.6) rotate(-30deg); opacity: 0; }
+  22% { transform: scale(1.1) rotate(0deg); opacity: 1; }
+  55% { transform: scale(1) rotate(0deg); opacity: 0.9; }
+  100% { transform: scale(1.05) rotate(0deg); opacity: 0; }
+}
+.flip7-self-flake {
+  animation: flip7SelfFlakeLand 2.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* --- Busted card settle (one-shot shake into grayscale) --- */
+@keyframes flip7BustSettle {
+  0% { transform: translateX(0); filter: grayscale(0); }
+  15% { transform: translateX(-6px); }
+  30% { transform: translateX(6px); }
+  45% { transform: translateX(-3px); }
+  60% { transform: translateX(3px); }
+  100% { transform: translateX(0); filter: grayscale(0.7); }
+}
+.flip7-bust-settle {
+  animation: flip7BustSettle 0.6s ease-out forwards;
+}
+
+/* --- Second Chance shield flash --- */
+@keyframes flip7ShieldFlash {
+  0% { transform: scale(0.5); opacity: 0; }
+  35% { transform: scale(1.25); opacity: 1; }
+  70% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.1); opacity: 0; }
+}
+.flip7-shield-flash {
+  animation: flip7ShieldFlash 1.1s ease-out forwards;
+}
+
+/* --- Flip 7 celebration banner --- */
+@keyframes flip7BannerIn {
+  0% { transform: scale(0.3) rotate(-8deg); opacity: 0; }
+  55% { transform: scale(1.15) rotate(3deg); opacity: 1; }
+  75% { transform: scale(0.95) rotate(0deg); }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+.flip7-banner-in {
+  animation: flip7BannerIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}

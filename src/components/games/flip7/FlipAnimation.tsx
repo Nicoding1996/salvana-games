@@ -74,7 +74,7 @@ export default function FlipAnimation({ card, result, playerName, isMe }: FlipAn
           {result === 'secondChance' && (
             <div>
               <p className="text-sm font-bold text-green-400">
-                💚 Second Chance!
+                💚 {isMe ? 'Saved!' : `${playerName} survived!`}
               </p>
               {card.type === 'number' && (
                 <p className="text-xs text-green-400/70 mt-0.5">

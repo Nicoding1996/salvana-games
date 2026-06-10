@@ -207,6 +207,29 @@ export const ACTION_TIMEOUT_MS = 15_000;     // 15s fallback if no turn timer
 export const ROUND_END_DISPLAY_MS = 4_000;   // 4s round summary display
 export const DEAL_ANIMATION_MS = 2_000;      // 2s deal animation
 
+// ---- Flip Animation Timing ----
+// How long each flipped card stays on screen (client overlay), and the gap
+// between consecutive cards in a multi-card sequence (e.g. Flip Three).
+// Shared so the server can delay the round-end transition long enough for the
+// full client-side flip animation to finish before showing the summary.
+export const FLIP_CARD_DISPLAY_MS = 1_500;   // safe / secondChance card
+export const FLIP_BUST_DISPLAY_MS = 2_500;   // bust card (longer to register)
+export const FLIP_CARD_GAP_MS = 180;         // gap between consecutive cards
+
+// Total time to animate a sequence of flip results, including inter-card gaps.
+// Used to size the round-end delay so animations never spill over the summary.
+export function flipSequenceDurationMs(
+  results: { result: 'safe' | 'bust' | 'secondChance' }[]
+): number {
+  if (results.length === 0) return 0;
+  const cards = results.reduce(
+    (sum, r) => sum + (r.result === 'bust' ? FLIP_BUST_DISPLAY_MS : FLIP_CARD_DISPLAY_MS),
+    0
+  );
+  const gaps = (results.length - 1) * FLIP_CARD_GAP_MS;
+  return cards + gaps;
+}
+
 // ---- Card Display Labels ----
 
 export const ACTION_CARD_LABELS: Record<ActionCardKind, { name: string; icon: string; color: string }> = {

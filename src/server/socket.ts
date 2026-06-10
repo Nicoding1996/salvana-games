@@ -8,6 +8,7 @@ import * as LiarsDice from './games/liars-dice/LiarsDiceGame';
 import * as Battleship from './games/battleship/BattleshipGame';
 import * as Poker from './games/poker/PokerGame';
 import * as Flip7 from './games/flip7/Flip7Game';
+import { flipSequenceDurationMs, FLIP_CARD_DISPLAY_MS } from '@/types/games/flip7';
 
 // Guard against double-triggering setup completion
 const setupLocks = new Set<string>();
@@ -886,15 +887,16 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       });
 
       if (result.turnResult === 'roundEnd') {
-        // Delay round end so bust/flip7 animation has time to play
+        // Delay round end so the bust/flip7 card animation finishes first.
         broadcastFlip7State(io, room);
+        const delay = flipSequenceDurationMs([{ result: result.result }]) + 400;
         setTimeout(() => {
           const roundResult = Flip7.endRound(room.code);
           if (roundResult) {
             io.to(room.code).emit('flip7:roundEnd', roundResult);
           }
           broadcastFlip7State(io, room);
-        }, 2000);
+        }, delay);
         return;
       }
 
@@ -964,6 +966,7 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         // Notify all players about the action
         io.to(room.code).emit('flip7:actionUsed', {
           type: 'freeze',
+          byId: socket.id,
           byName: drawerPlayer?.name || 'Unknown',
           targetId: data.targetId,
           targetName: targetPlayer?.name || 'Unknown',
@@ -976,6 +979,7 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         // Notify all players about the action
         io.to(room.code).emit('flip7:actionUsed', {
           type: 'flipThree',
+          byId: socket.id,
           byName: drawerPlayer?.name || 'Unknown',
           targetId: data.targetId,
           targetName: targetPlayer?.name || 'Unknown',
@@ -1000,13 +1004,20 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
 
       if (result.turnResult === 'roundEnd') {
         broadcastFlip7State(io, room);
+        // Delay the round-end transition long enough for the full flip
+        // animation to play (Flip Three can draw up to 3 cards). Freeze draws
+        // no cards, so it falls back to the single-card display floor.
+        const animationMs = result.flipThreeResults
+          ? flipSequenceDurationMs(result.flipThreeResults)
+          : 0;
+        const delay = Math.max(FLIP_CARD_DISPLAY_MS, animationMs + 400);
         setTimeout(() => {
           const roundResult = Flip7.endRound(room.code);
           if (roundResult) {
             io.to(room.code).emit('flip7:roundEnd', roundResult);
           }
           broadcastFlip7State(io, room);
-        }, 1500);
+        }, delay);
         return;
       }
 
@@ -1053,16 +1064,24 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
           }
         }
 
-        if (chaosResult.roundEnd) {
-          const roundResult = Flip7.endRound(room.code);
-          if (roundResult) {
-            io.to(room.code).emit('flip7:roundEnd', roundResult);
-          }
-        }
-
+        // Update hands immediately so they're current under the flip animation
         broadcastFlip7State(io, room);
 
-        if (!chaosResult.roundEnd) {
+        if (chaosResult.roundEnd) {
+          // Wait for all flipped cards to finish animating before the summary.
+          const flipped = chaosResult.results.filter(r => r.choice === 'hit' && r.card);
+          const animationMs = flipSequenceDurationMs(
+            flipped.map(r => ({ result: r.result || 'safe' }))
+          );
+          const delay = Math.max(FLIP_CARD_DISPLAY_MS, animationMs + 400);
+          setTimeout(() => {
+            const roundResult = Flip7.endRound(room.code);
+            if (roundResult) {
+              io.to(room.code).emit('flip7:roundEnd', roundResult);
+            }
+            broadcastFlip7State(io, room);
+          }, delay);
+        } else {
           startFlip7TurnTimer(io, room);
         }
       }
@@ -1728,14 +1747,22 @@ function startFlip7TurnTimer(io: SocketIOServer, room: Room): void {
               });
             }
           }
-          if (chaosResult.roundEnd) {
-            const roundResult = Flip7.endRound(room.code);
-            if (roundResult) {
-              io.to(room.code).emit('flip7:roundEnd', roundResult);
-            }
-          }
           broadcastFlip7State(io, room);
-          if (!chaosResult.roundEnd) {
+          if (chaosResult.roundEnd) {
+            // Wait for all flipped cards to finish animating before the summary.
+            const flipped = chaosResult.results.filter(r => r.choice === 'hit' && r.card);
+            const animationMs = flipSequenceDurationMs(
+              flipped.map(r => ({ result: r.result || 'safe' }))
+            );
+            const delay = Math.max(FLIP_CARD_DISPLAY_MS, animationMs + 400);
+            setTimeout(() => {
+              const roundResult = Flip7.endRound(room.code);
+              if (roundResult) {
+                io.to(room.code).emit('flip7:roundEnd', roundResult);
+              }
+              broadcastFlip7State(io, room);
+            }, delay);
+          } else {
             startFlip7TurnTimer(io, room);
           }
         }

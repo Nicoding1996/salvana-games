@@ -1,10 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useFlip7 } from '@/lib/games/flip7/useFlip7';
 import type { useRoom } from '@/lib/hub/useRoom';
 import FlipAnimation from './FlipAnimation';
 import ActionSheet from './ActionSheet';
+import ActionAnimation from './ActionAnimation';
+import FrozenSelfOverlay from './FrozenSelfOverlay';
 import RoundSummary from './RoundSummary';
 import GameOver from './GameOver';
 
@@ -16,8 +18,10 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
   const { playerId, isHost, connected, leaveRoom } = roomHook;
   const {
     gameState,
+    displayState,
     turnTimer,
     lastFlipEvent,
+    flipKey,
     chaosSubmitted,
     actionNotification,
     hit,
@@ -34,12 +38,66 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
   const [endGameConfirm, setEndGameConfirm] = useState(false);
 
   const { phase, players, isMyTurn, activePlayerId, settings, myCards,
-    myModifiers, mySecondChances, myRoundStatus, pendingAction,
-    pendingModifier, deckRemaining, round, activityLog,
+    mySecondChances, myRoundStatus, pendingAction,
+    pendingModifier, deckRemaining, round,
     flipSevenAchievedBy, roundScores, winnerId } = gameState;
 
   const activePlayer = players.find(p => p.id === activePlayerId);
   const myPlayer = players.find(p => p.id === playerId);
+
+  // Display-masked hand data: cards still mid-flip-animation are hidden from the
+  // table so each one lands exactly when its overlay finishes (no spoiling).
+  // Control logic (buttons, turn) keeps using the authoritative gameState above.
+  const dPlayers = displayState.players;
+  const dMyCards = displayState.myCards;
+  const dMyModifiers = displayState.myModifiers;
+  const dMyRoundStatus = displayState.myRoundStatus;
+  const dMyPlayer = dPlayers.find(p => p.id === playerId);
+
+  // Auto-scroll the active player's hand into view + haptic when it becomes my turn
+  const activeCardRef = useRef<HTMLDivElement>(null);
+  const wasMyTurnRef = useRef(false);
+
+  useEffect(() => {
+    if (phase !== 'playing') return;
+    if (activeCardRef.current) {
+      activeCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    if (isMyTurn && !wasMyTurnRef.current) {
+      navigator.vibrate?.(35);
+    }
+    wasMyTurnRef.current = isMyTurn;
+  }, [activePlayerId, isMyTurn, phase]);
+
+  // One-shot "you got iced" reaction + haptic, fired off the discrete freeze
+  // event rather than myRoundStatus — the frozen status lingers through the
+  // roundEnd boundary, so a status-based trigger could replay next round.
+  // Each freeze pushes a fresh notification object; seeding the ref with the
+  // current value keeps a mid-freeze reconnect from re-triggering.
+  const [frozenSelfKey, setFrozenSelfKey] = useState(0);
+  const lastFreezeNotifRef = useRef(actionNotification);
+  useEffect(() => {
+    const n = actionNotification;
+    if (
+      n && n !== lastFreezeNotifRef.current &&
+      n.type === 'freeze' && n.targetId === playerId
+    ) {
+      setFrozenSelfKey(k => k + 1);
+      navigator.vibrate?.([0, 70, 50, 130]);
+    }
+    lastFreezeNotifRef.current = n;
+  }, [actionNotification, playerId]);
+
+  // Retire the one-shot overlay back to 0 once it has finished playing. Without
+  // this, frozenSelfKey stays > 0 for the rest of the game and the overlay
+  // replays every time the playing UI re-mounts at a round boundary (the
+  // playing subtree unmounts during roundEnd). Only the frozen player ever has
+  // a non-zero key, which is why the replay was unique to them.
+  useEffect(() => {
+    if (frozenSelfKey === 0) return;
+    const t = setTimeout(() => setFrozenSelfKey(0), 2300);
+    return () => clearTimeout(t);
+  }, [frozenSelfKey]);
 
   const handleEndGame = () => {
     if (!endGameConfirm) {
@@ -85,7 +143,7 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
     return (
       <div data-game="flip-7">
         {lastFlipEvent && (
-          <FlipAnimation card={lastFlipEvent.card} result={lastFlipEvent.result} playerName={lastFlipEvent.playerName} isMe={lastFlipEvent.playerId === playerId} />
+          <FlipAnimation key={flipKey} card={lastFlipEvent.card} result={lastFlipEvent.result} playerName={lastFlipEvent.playerName} isMe={lastFlipEvent.playerId === playerId} />
         )}
         <GameOver
           players={players}
@@ -106,9 +164,10 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
     return (
       <div data-game="flip-7">
         {lastFlipEvent && (
-          <FlipAnimation card={lastFlipEvent.card} result={lastFlipEvent.result} playerName={lastFlipEvent.playerName} isMe={lastFlipEvent.playerId === playerId} />
+          <FlipAnimation key={flipKey} card={lastFlipEvent.card} result={lastFlipEvent.result} playerName={lastFlipEvent.playerName} isMe={lastFlipEvent.playerId === playerId} />
         )}
         <RoundSummary
+          key={round}
           players={players}
           roundScores={roundScores}
           round={round}
@@ -206,7 +265,13 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
 
       {/* Turn indicator */}
       <div className="text-center py-2">
-        {settings.mode === 'classic' && (
+        {flipSevenAchievedBy ? (
+          <p className="text-sm font-semibold text-(--game-accent)">
+            {flipSevenAchievedBy === playerId
+              ? '🎉 FLIP 7! Round over'
+              : `🎉 ${players.find(p => p.id === flipSevenAchievedBy)?.name ?? 'Someone'} hit Flip 7!`}
+          </p>
+        ) : settings.mode === 'classic' && (
           isMyTurn ? (
             <p className="text-sm font-semibold text-(--game-accent)">Your turn — Hit or Stay?</p>
           ) : activePlayer ? (
@@ -215,7 +280,7 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
             </p>
           ) : null
         )}
-        {settings.mode === 'chaos' && myRoundStatus === 'active' && (
+        {!flipSevenAchievedBy && settings.mode === 'chaos' && myRoundStatus === 'active' && (
           <p className="text-sm font-semibold text-(--game-accent)">Choose: Hit or Stay?</p>
         )}
       </div>
@@ -223,31 +288,38 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
       {/* All players' hands — scrollable */}
       <div className="flex-1 overflow-y-auto px-3 space-y-2 pb-2">
         {/* Your hand (highlighted) */}
-        <div className={`rounded-xl border-2 p-3 ${
-          isMyTurn ? 'border-(--game-accent) bg-(--game-accent)/5' : 'border-(--border-light) bg-(--bg-card)'
-        }`}>
+        <div
+          ref={isMyTurn ? activeCardRef : undefined}
+          className={`relative overflow-hidden rounded-xl border-2 p-3 ${
+            isMyTurn ? 'border-(--game-accent) bg-(--game-accent)/5 flip7-turn-glow' : 'border-(--border-light) bg-(--bg-card)'
+          } ${dMyRoundStatus === 'busted' ? 'flip7-bust-settle' : ''} ${dMyRoundStatus === 'frozen' ? 'flip7-frost' : ''}`}
+        >
+          {/* Frost watermark for frozen state */}
+          {dMyRoundStatus === 'frozen' && (
+            <span className="pointer-events-none absolute right-2 top-1 text-3xl opacity-25 select-none">❄️</span>
+          )}
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <span className="text-sm">{myPlayer?.avatar}</span>
               <span className="text-xs font-semibold text-(--text-primary)">You</span>
-              {myRoundStatus === 'busted' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--danger)/20 text-(--danger) font-bold">BUST</span>}
-              {myRoundStatus === 'stayed' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--text-muted)/20 text-(--text-muted) font-bold">STAYED</span>}
-              {myRoundStatus === 'frozen' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">FROZEN</span>}
+              {dMyRoundStatus === 'busted' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--danger)/20 text-(--danger) font-bold">BUST</span>}
+              {dMyRoundStatus === 'stayed' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--text-muted)/20 text-(--text-muted) font-bold">STAYED</span>}
+              {dMyRoundStatus === 'frozen' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">FROZEN</span>}
             </div>
             <span className="text-xs font-bold text-(--game-accent)">
               +{(() => {
-                if (myRoundStatus === 'busted') return 0;
-                let base = myCards.reduce((s, c) => s + c.value, 0);
-                const times2 = myModifiers.filter(m => m === 'times2').length;
+                if (dMyRoundStatus === 'busted') return 0;
+                let base = dMyCards.reduce((s, c) => s + c.value, 0);
+                const times2 = dMyModifiers.filter(m => m === 'times2').length;
                 base *= Math.pow(2, times2);
-                base += myModifiers.reduce((s, m) => m === 'plus2' ? s + 2 : m === 'plus4' ? s + 4 : s, 0);
+                base += dMyModifiers.reduce((s, m) => m === 'plus2' ? s + 2 : m === 'plus4' ? s + 4 : s, 0);
                 return base;
               })()} this round
             </span>
           </div>
           <div className="flex gap-1.5 flex-wrap">
             {/* Number cards first (sorted by value) */}
-            {[...myCards].sort((a, b) => a.value - b.value).map((card, i) => {
+            {[...dMyCards].sort((a, b) => a.value - b.value).map((card, i) => {
               const val = card.value;
               return (
                 <div key={i} className="w-11 h-14 rounded-lg flex flex-col items-center justify-center shadow-sm" style={{
@@ -260,13 +332,13 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
               );
             })}
             {/* Show bust card with red highlight */}
-            {myRoundStatus === 'busted' && myPlayer?.bustCard !== null && myPlayer?.bustCard !== undefined && (
+            {dMyRoundStatus === 'busted' && dMyPlayer?.bustCard !== null && dMyPlayer?.bustCard !== undefined && (
               <div className="w-11 h-14 rounded-lg flex flex-col items-center justify-center shadow-sm bg-red-100 border-2 border-red-500">
-                <span className="text-base font-bold text-red-600">{myPlayer.bustCard}</span>
+                <span className="text-base font-bold text-red-600">{dMyPlayer.bustCard}</span>
                 <span className="text-[7px] text-red-400">💀</span>
               </div>
             )}
-            {myModifiers.map((mod, i) => (
+            {dMyModifiers.map((mod, i) => (
               <div key={`m${i}`} className="w-11 h-14 rounded-lg flex items-center justify-center shadow-sm bg-(--bg-elevated) border border-(--game-accent)/40">
                 <span className="text-sm font-bold text-(--game-accent)">{mod === 'plus2' ? '+2' : mod === 'plus4' ? '+4' : '×2'}</span>
               </div>
@@ -276,20 +348,27 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
                 <span className="text-sm">💚</span>
               </div>
             )}
-            {myCards.length === 0 && myRoundStatus === 'active' && (
+            {dMyCards.length === 0 && dMyRoundStatus === 'active' && (
               <span className="text-[10px] text-(--text-muted) py-2">Waiting for cards...</span>
             )}
           </div>
         </div>
 
         {/* Other players' hands */}
-        {players.filter(p => p.id !== playerId).map(p => {
+        {dPlayers.filter(p => p.id !== playerId).map(p => {
           const isActive = p.id === activePlayerId;
           return (
-            <div key={p.id} className={`rounded-xl border p-3 ${
-              isActive ? 'border-(--game-accent)/50 bg-(--game-accent)/5' : 'border-(--border) bg-(--bg-card)/50'
-            } ${p.roundStatus === 'busted' ? 'opacity-50' : ''}`}>
-              <div className="flex items-center justify-between mb-2">
+            <div
+              key={p.id}
+              ref={isActive ? activeCardRef : undefined}
+              className={`relative overflow-hidden rounded-xl border p-3 ${
+                isActive ? 'border-(--game-accent)/50 bg-(--game-accent)/5 flip7-turn-glow' : 'border-(--border) bg-(--bg-card)/50'
+              } ${p.roundStatus === 'busted' ? 'opacity-50 flip7-bust-settle' : ''} ${p.roundStatus === 'frozen' ? 'flip7-frost' : ''}`}
+            >
+              {/* Frost watermark for frozen state */}
+              {p.roundStatus === 'frozen' && (
+                <span className="pointer-events-none absolute right-2 top-1 text-2xl opacity-25 select-none">❄️</span>
+              )}              <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className="text-sm">{p.avatar}</span>
                   <span className="text-xs font-semibold text-(--text-primary)">{p.name}</span>
@@ -332,6 +411,11 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
                     <span className="text-[10px] font-bold text-(--game-accent)">{mod === 'plus2' ? '+2' : mod === 'plus4' ? '+4' : '×2'}</span>
                   </div>
                 ))}
+                {p.hasSecondChance && (
+                  <div className="w-9 h-12 rounded-md flex items-center justify-center bg-(--bg-elevated) border border-green-500/40">
+                    <span className="text-sm">💚</span>
+                  </div>
+                )}
                 {(p.visibleCards?.length ?? 0) === 0 && p.roundStatus === 'active' && (
                   <span className="text-[9px] text-(--text-muted) py-1">No cards yet</span>
                 )}
@@ -344,12 +428,19 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
       {/* Flip animation overlay — shows on top of everything (but not during pending actions) */}
       {lastFlipEvent && !pendingAction && (
         <FlipAnimation
+          key={flipKey}
           card={lastFlipEvent.card}
           result={lastFlipEvent.result}
           playerName={lastFlipEvent.playerName}
           isMe={lastFlipEvent.playerId === playerId}
         />
       )}
+
+      {/* Action "attack" animation overlay (Freeze / Flip Three flying to target) */}
+      <ActionAnimation notification={actionNotification} myId={playerId || ''} />
+
+      {/* Full-screen frost reaction shown only to the player who just got frozen */}
+      <FrozenSelfOverlay triggerKey={frozenSelfKey} />
 
       {/* Action sheet */}
       {pendingAction && pendingAction.eligibleTargets.length > 0 && (
@@ -375,7 +466,7 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
       )}
 
       {/* HIT / STAY buttons */}
-      {(isMyTurn || (settings.mode === 'chaos' && myRoundStatus === 'active' && !chaosSubmitted)) && !pendingAction && !pendingModifier && (
+      {(isMyTurn || (settings.mode === 'chaos' && myRoundStatus === 'active' && !chaosSubmitted)) && !pendingAction && !pendingModifier && !flipSevenAchievedBy && myRoundStatus === 'active' && (
         <div className="px-4 pb-4 pt-2 flex gap-3">
           <button
             onClick={settings.mode === 'chaos' ? () => chaosChoice('stay') : stay}
@@ -400,15 +491,15 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
       )}
 
       {/* Busted/stayed message */}
-      {myRoundStatus === 'busted' && (
+      {dMyRoundStatus === 'busted' && (
         <div className="text-center py-4 px-4">
           <p className="text-sm text-(--text-muted)">💀 You busted — waiting for round to end</p>
         </div>
       )}
-      {(myRoundStatus === 'stayed' || myRoundStatus === 'frozen') && (
+      {(dMyRoundStatus === 'stayed' || dMyRoundStatus === 'frozen') && (
         <div className="text-center py-4 px-4">
           <p className="text-sm text-(--text-muted)">
-            {myRoundStatus === 'frozen' ? '❄️ You were frozen' : '✓ You stayed'} — watching others
+            {dMyRoundStatus === 'frozen' ? '❄️ You were frozen' : '✓ You stayed'} — watching others
           </p>
         </div>
       )}

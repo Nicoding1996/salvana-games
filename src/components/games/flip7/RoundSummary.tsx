@@ -1,7 +1,11 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import type { Flip7PlayerInfo } from '@/types/games/flip7';
 import Confetti from '@/components/shared/Confetti';
+
+// Seconds the round summary stays locked so all players can read the results
+const NEXT_ROUND_LOCKOUT = 3;
 
 interface RoundSummaryProps {
   players: Flip7PlayerInfo[];
@@ -24,18 +28,43 @@ export default function RoundSummary({
 
   const flipSevenPlayer = players.find(p => p.id === flipSevenBy);
 
+  // Countdown lockout so everyone gets a beat to read the round results
+  // before the host can advance.
+  const [lockRemaining, setLockRemaining] = useState(NEXT_ROUND_LOCKOUT);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLockRemaining(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const locked = lockRemaining > 0;
+
   return (
     <div className="flex-1 flex flex-col max-w-lg mx-auto w-full p-4" data-game="flip-7">
       {flipSevenBy && <Confetti />}
 
+      {/* Flip 7 celebration banner */}
+      {flipSevenPlayer && (
+        <div className="flip7-banner-in mb-4 rounded-2xl p-4 text-center bg-linear-to-r from-(--game-accent)/20 via-(--game-secondary)/20 to-(--game-accent)/20 border border-(--game-accent)/40">
+          <p className="text-3xl font-extrabold tracking-wide text-(--game-accent)">FLIP 7! 🃏</p>
+          <p className="text-sm font-semibold text-(--text-primary) mt-1">
+            {flipSevenPlayer.avatar} {flipSevenPlayer.name} collected 7 unique cards
+          </p>
+          <p className="text-xs text-(--game-secondary) font-bold mt-0.5">+15 bonus points</p>
+        </div>
+      )}
+
       {/* Header */}
       <div className="text-center mb-4">
         <h2 className="text-lg font-bold text-(--text-primary)">Round {round} Complete</h2>
-        {flipSevenPlayer && (
-          <p className="text-sm text-(--game-accent) font-semibold animate-celebrate mt-1">
-            🎉 {flipSevenPlayer.name} got Flip 7! (+15 bonus)
-          </p>
-        )}
       </div>
 
       {/* Leaderboard */}
@@ -78,9 +107,14 @@ export default function RoundSummary({
         {isHost && !winnerId && (
           <button
             onClick={onNextRound}
-            className="w-full py-3.5 bg-(--game-accent) text-black rounded-xl font-semibold active:scale-[0.97] transition-all"
+            disabled={locked}
+            className={`w-full py-3.5 rounded-xl font-semibold transition-all ${
+              locked
+                ? 'bg-(--bg-card) border border-(--border) text-(--text-muted)'
+                : 'bg-(--game-accent) text-black active:scale-[0.97]'
+            }`}
           >
-            Next Round →
+            {locked ? `Next round in ${lockRemaining}…` : 'Next Round →'}
           </button>
         )}
         {winnerId && (
