@@ -22,9 +22,12 @@ export default function ActionAnimation({ notification, myId }: ActionAnimationP
   const icon = isFreeze ? '❄️' : '⚡';
   const accent = isFreeze ? '#60a5fa' : '#fbbf24';
 
+  const isSelf = notification.byId === notification.targetId;
   const byLabel = notification.byId === myId ? 'You' : notification.byName;
   const targetLabel = notification.targetId === myId ? 'you' : notification.targetName;
   const verb = isFreeze ? 'froze' : 'zapped';
+  // Self-target: "You froze yourself!" / "Alice froze themselves!"
+  const selfTargetLabel = notification.byId === myId ? 'yourself' : 'themselves';
 
   const key = `${notification.byId}-${notification.targetId}-${notification.type}`;
 
@@ -46,7 +49,7 @@ export default function ActionAnimation({ notification, myId }: ActionAnimationP
         className="mt-6 px-4 py-2 rounded-full text-sm font-bold flip7-label-out"
         style={{ backgroundColor: `${accent}1f`, color: accent, border: `1px solid ${accent}55` }}
       >
-        {byLabel} {verb} {targetLabel}!
+        {byLabel} {verb} {isSelf ? selfTargetLabel : targetLabel}!
       </div>
     </div>
   );

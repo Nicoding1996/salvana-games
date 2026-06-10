@@ -247,14 +247,22 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
         }`}>
           {actionNotification.type === 'freeze' ? (
             <p className="text-sm font-semibold text-blue-400">
-              ❄️ {actionNotification.targetId === playerId
+              ❄️ {actionNotification.byId === actionNotification.targetId
+                ? (actionNotification.byId === playerId
+                    ? 'You froze yourself!'
+                    : `${actionNotification.byName} froze themselves!`)
+                : actionNotification.targetId === playerId
                 ? `${actionNotification.byName} froze you!`
                 : `${actionNotification.byName} froze ${actionNotification.targetName}!`
               }
             </p>
           ) : (
             <p className="text-sm font-semibold text-yellow-400">
-              ⚡ {actionNotification.targetId === playerId
+              ⚡ {actionNotification.byId === actionNotification.targetId
+                ? (actionNotification.byId === playerId
+                    ? 'You forced yourself to draw 3!'
+                    : `${actionNotification.byName} forced themselves to draw 3!`)
+                : actionNotification.targetId === playerId
                 ? `${actionNotification.byName} forced you to draw 3!`
                 : `${actionNotification.byName} forced ${actionNotification.targetName} to draw 3!`
               }
