@@ -10,7 +10,7 @@ import ActionAnimation from './ActionAnimation';
 import ActionSheet from './ActionSheet';
 import RoundSummary from './RoundSummary';
 import GameOver from './GameOver';
-import TimerBar from './TimerBar';
+import TimerBar from '@/components/shared/TimerBar';
 import { CardBack, DeckPile, NumberCard } from './CardArt';
 import { MyHand, OpponentRow } from './PlayerHands';
 

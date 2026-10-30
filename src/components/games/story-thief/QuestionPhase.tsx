@@ -1,116 +1,127 @@
 'use client';
 
-import type { RoundMode } from '@/types/hub';
+import type { Room, Team } from '@/types/hub';
+import type { StoryThiefClientState } from '@/types/games/story-thief';
+import { QUESTION_IDEAS } from '@/types/games/story-thief';
+import TimerBar from '@/components/shared/TimerBar';
+import { roleOf } from './StoryReveal';
+import { PhaseScreen, StoryCard, SuspectRow } from './ui';
 
-interface Props {
-  story: string;
-  bluffingTeamMembers: { id: string; name: string; avatar: string }[];
+const URGENT_AT = 10;
+
+interface QuestionPhaseProps {
+  state: StoryThiefClientState;
+  room: Room;
+  bluffingTeam: Team | undefined;
   isOnBluffingTeam: boolean;
-  isMyStory: boolean;
-  hintCard: string | null;
-  timerSeconds: number | null;
-  roundMode: RoundMode;
-  onEndPhase: () => void;
+  playerId: string;
   isHost: boolean;
-  teamColor?: string;
+  timer: number | null;
+  onEndPhase: () => void;
+}
+
+/** Three question ideas, a different set each round. */
+function questionIdeas(round: number): string[] {
+  const start = (round * 3) % QUESTION_IDEAS.length;
+  return [0, 1, 2].map(i => QUESTION_IDEAS[(start + i) % QUESTION_IDEAS.length]);
 }
 
 export default function QuestionPhase({
-  story, bluffingTeamMembers, isOnBluffingTeam, isMyStory,
-  hintCard, timerSeconds, roundMode,
-  onEndPhase, isHost, teamColor,
-}: Props) {
-  const isUrgent = roundMode === 'timed' && timerSeconds !== null && timerSeconds <= 10;
+  state, room, bluffingTeam, isOnBluffingTeam, playerId, isHost, timer, onEndPhase,
+}: QuestionPhaseProps) {
+  const role = roleOf(state, isOnBluffingTeam);
+  const timed = room.settings.roundMode === 'timed';
+  const canEnd = isHost || (!timed && !isOnBluffingTeam);
+  const urgent = timed && timer !== null && timer <= URGENT_AT;
+
+  let footer;
+  if (canEnd) {
+    footer = (
+      <button
+        type="button"
+        onClick={onEndPhase}
+        className={`h-14 w-full rounded-2xl font-heading text-base font-semibold transition-transform active:scale-[0.97] ${
+          isOnBluffingTeam
+            ? 'border border-(--border-light) bg-(--bg-card) text-(--text-secondary)'
+            : 'bg-(--game-accent) text-(--bg-primary)'
+        }`}
+      >
+        {timed ? 'End questions early · vote now' : 'We’re ready · start the vote'}
+      </button>
+    );
+  } else {
+    footer = (
+      <p className="flex min-h-14 items-center justify-center rounded-2xl border border-dashed border-(--border-light) px-4 text-center text-sm text-(--text-secondary)">
+        {timed ? 'Voting starts when the timer runs out' : 'The guessers start the vote when they’re ready'}
+      </p>
+    );
+  }
 
   return (
-    <div className="flex-1 flex flex-col">
-      {/* Timer bar */}
-      {roundMode === 'timed' && timerSeconds !== null && (
-        <div className={`flex items-center justify-center py-3 border-b ${isUrgent ? 'border-(--danger)/30 bg-(--danger-dim)' : 'border-(--border)'}`}>
-          <span className={`font-mono text-lg font-bold ${isUrgent ? 'animate-timer-urgent' : 'text-(--text-secondary)'}`}>
-            {timerSeconds}s
-          </span>
+    <PhaseScreen footer={footer}>
+      {/* Clock */}
+      {timed ? (
+        <div className={`mb-3 rounded-2xl border px-4 py-2.5 ${urgent ? 'border-(--danger)/40 bg-(--danger-dim)' : 'border-(--border) bg-(--bg-card)'}`}>
+          <div className="flex items-baseline justify-between">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-(--text-muted)">Question time</p>
+            <p
+              className={`font-mono text-2xl font-bold tabular-nums ${urgent ? 'text-(--danger) animate-timer-urgent' : 'text-(--text-primary)'}`}
+              aria-live="off"
+            >
+              {timer ?? room.settings.timerSeconds}s
+            </p>
+          </div>
+          <div className="mt-2">
+            <TimerBar seconds={timer ?? room.settings.timerSeconds} total={room.settings.timerSeconds} urgentAt={URGENT_AT} />
+          </div>
         </div>
-      )}
-      {roundMode === 'freeFlow' && (
-        <div className="flex items-center justify-center py-2.5 border-b border-(--border)">
-          <span className="text-xs text-(--text-muted)">🌊 Free Flow</span>
-        </div>
+      ) : (
+        <p className="mb-3 text-center text-xs text-(--text-muted)">🌊 Free flow · take as long as you like</p>
       )}
 
-      {/* Story — prominent, centered */}
-      <div className="px-5 pt-5 pb-3">
-        <div
-          className="rounded-xl p-5 relative overflow-hidden"
-          style={{
-            background: 'linear-gradient(135deg, var(--bg-elevated) 0%, rgba(31, 28, 50, 0.8) 100%)',
-            border: `1px solid ${teamColor ? teamColor + '20' : 'rgba(232, 168, 73, 0.12)'}`,
-          }}
-        >
-          <div
-            className="absolute top-0 left-0 right-0 h-[2px]"
-            style={{
-              background: teamColor
-                ? `linear-gradient(90deg, transparent, ${teamColor}, transparent)`
-                : 'linear-gradient(90deg, transparent, var(--game-accent), transparent)',
-              opacity: 0.4,
-            }}
-          />
-          <p className="text-base leading-relaxed text-center">
-            &ldquo;{story}&rdquo;
-          </p>
-        </div>
+      <StoryCard story={state.currentStory ?? ''} teamColor={bluffingTeam?.color} size="md" />
+
+      {/* Who claims it: right under the story so it stays on screen */}
+      <div className="mt-4">
+        <p className="mb-2.5 text-center text-[10px] uppercase tracking-[0.18em] text-(--text-muted)">Suspects</p>
+        <SuspectRow members={state.bluffingTeamMembers} teamColor={bluffingTeam?.color} myId={playerId} />
       </div>
 
-      {/* Role + suspects — centered */}
-      <div className="flex-1 flex flex-col items-center justify-center px-5 gap-5">
-        {isMyStory && (
-          <div className="bg-(--game-accent-dim) border border-(--game-accent)/25 rounded-xl px-5 py-3 text-center animate-fade-in">
-            <p className="text-(--game-accent) font-semibold">🎯 Your story — be truthful</p>
-          </div>
+      {/* What to do right now */}
+      <section className="mt-4 rounded-2xl border border-(--border) bg-(--bg-card) p-4" aria-label="Your role">
+        {role === 'guesser' && (
+          <>
+            <p className="text-sm font-bold text-(--text-primary)">🔍 Ask them out loud</p>
+            <p className="mt-0.5 text-xs text-(--text-secondary)">Everyone on the other team claims it. Watch who hesitates.</p>
+            <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Question ideas">
+              {questionIdeas(state.roundNumber).map(q => (
+                <li key={q} className="rounded-full border border-(--border-light) bg-(--bg-elevated) px-3 py-1.5 text-xs text-(--text-primary)">
+                  “{q}”
+                </li>
+              ))}
+            </ul>
+          </>
         )}
-
-        {isOnBluffingTeam && !isMyStory && (
-          <div className="bg-(--game-secondary-dim) border border-(--game-secondary)/25 rounded-xl px-5 py-3 text-center animate-fade-in">
-            <p className="text-(--game-secondary) font-semibold">🎭 Bluff — make it yours</p>
-            {hintCard && (
-              <p className="text-xs text-(--text-muted) mt-1.5 italic">💡 {hintCard}</p>
+        {role === 'bluffer' && (
+          <>
+            <p className="text-sm font-bold text-(--game-secondary)">🎭 You’re bluffing</p>
+            <p className="mt-0.5 text-xs text-(--text-secondary)">Say it’s yours. Answer quickly and confidently.</p>
+            {state.hintCard && (
+              <p className="mt-3 rounded-xl bg-(--game-secondary-dim) px-3 py-2 text-xs leading-relaxed text-(--text-primary)">
+                💡 {state.hintCard}
+              </p>
             )}
-          </div>
+          </>
         )}
-
-        {!isOnBluffingTeam && (
-          <div className="text-center animate-fade-in">
-            <p className="text-2xl mb-2">🔍</p>
-            <p className="font-semibold text-base">Ask questions out loud</p>
-            <p className="text-xs text-(--text-muted) mt-1">Who really wrote this?</p>
-          </div>
+        {role === 'author' && (
+          <>
+            <p className="text-sm font-bold text-(--game-accent)">🎯 Your story · tell the truth</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-(--text-secondary)">
+              Don’t over-explain. Real memories are a little fuzzy, and the bluffers will be the ones adding details.
+            </p>
+          </>
         )}
-
-        {/* Suspects */}
-        <div className="flex gap-5 flex-wrap justify-center">
-          {bluffingTeamMembers.map((member) => (
-            <div key={member.id} className="flex flex-col items-center gap-1.5">
-              <div className="w-12 h-12 rounded-full bg-(--bg-card) border border-(--border) flex items-center justify-center text-2xl">
-                {member.avatar}
-              </div>
-              <span className="text-[11px] text-(--text-muted)">{member.name}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* End questions button */}
-      {(isHost || (isOnBluffingTeam && roundMode === 'freeFlow')) && (
-        <div className="p-4">
-          <button
-            onClick={onEndPhase}
-            className="w-full py-3.5 bg-(--game-accent) text-(--bg-primary) rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
-          >
-            End Questions → Vote
-          </button>
-        </div>
-      )}
-    </div>
+      </section>
+    </PhaseScreen>
   );
 }

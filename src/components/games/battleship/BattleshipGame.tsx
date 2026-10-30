@@ -1,221 +1,172 @@
 'use client';
 
-import { useState } from 'react';
-import { useBattleship } from '@/lib/games/battleship/useBattleship';
+import { useCallback, useState } from 'react';
 import type { useRoom } from '@/lib/hub/useRoom';
+import { useBattleship } from '@/lib/games/battleship/useBattleship';
+import type { BattleshipSettings } from '@/types/games/battleship';
+import { BATTLESHIP_MAX_PLAYERS, BATTLESHIP_MIN_PLAYERS } from '@/types/games/battleship';
+import RulesSheet from '@/components/shared/RulesSheet';
+import EndGameButton from '@/components/shared/EndGameButton';
 import ShipPlacement from './ShipPlacement';
 import AttackGrid from './AttackGrid';
-import FleetStatus from './FleetStatus';
 import GameOver from './GameOver';
 
 interface BattleshipGameProps {
   roomHook: ReturnType<typeof useRoom>;
 }
 
+// The first-game quick rules are shown once per page load.
+let quickRulesSeen = false;
+
+function QuickRules({ settings, onClose }: { settings: BattleshipSettings; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[45] flex items-end justify-center" role="dialog" aria-modal="true" aria-labelledby="bs-quick-rules">
+      <div className="absolute inset-0 bg-black/60 animate-fade-in" onClick={onClose} aria-hidden="true" />
+      <div className="battleship-card relative w-full max-w-lg rounded-t-3xl px-5 pt-5 bs-safe-bottom bs-sheet-up">
+        <h2 id="bs-quick-rules" className="text-center text-lg font-bold text-(--text-primary)">⚓ How Battleship works</h2>
+        <ul className="mt-4 space-y-3 text-sm text-(--text-secondary)">
+          <li className="flex gap-3">
+            <span className="w-8 shrink-0 text-center text-xl" aria-hidden="true">🚢</span>
+            <span>Hide your 4 ships on your grid. Tap a ship, then a square. Tap a placed ship to move it, tap again to turn it, or hit Shuffle.</span>
+          </li>
+          <li className="flex gap-3">
+            <span className="w-8 shrink-0 text-center text-xl" aria-hidden="true">🎯</span>
+            <span>
+              On your turn, tap squares on an opponent&apos;s grid to fire.{' '}
+              {settings.shotMode === 'salvo'
+                ? <>In <strong className="text-(--game-accent)">Salvo</strong> you get one shot per ship still afloat.</>
+                : <>You get <strong className="text-(--text-primary)">1 shot</strong> per turn.</>}
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span className="w-8 shrink-0 text-center text-xl" aria-hidden="true">💥</span>
+            <span>Hit: fire on the square. Miss: a grey dot. Hit every square of a ship to sink it.</span>
+          </li>
+          {settings.sonarPing && (
+            <li className="flex gap-3">
+              <span className="w-8 shrink-0 text-center text-xl" aria-hidden="true">📡</span>
+              <span>Once per game, a sonar ping tells you if a 2×2 area hides a ship. Only you see the answer.</span>
+            </li>
+          )}
+          <li className="flex gap-3">
+            <span className="w-8 shrink-0 text-center text-xl" aria-hidden="true">🏆</span>
+            <span>Lose all your ships and you&apos;re out. Last fleet afloat wins.</span>
+          </li>
+        </ul>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-5 h-14 w-full rounded-2xl bg-(--game-accent) font-heading text-base font-semibold text-(--bg-primary) transition-transform active:scale-[0.97]"
+        >
+          Deploy my fleet
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function BattleshipGame({ roomHook }: BattleshipGameProps) {
-  const { playerId, isHost, connected, leaveRoom } = roomHook;
-  const pid = playerId || '';
-  const {
-    gameState,
-    turnTimer,
-    placementTimer,
-    shotResult,
-    sonarResult,
-    placeShips,
-    autoPlace,
-    fire,
-    useSonar,
-    endGame,
-    rematch,
-  } = useBattleship();
+  const { playerId, isHost, leaveRoom, room } = roomHook;
+  const myId = playerId ?? '';
+  const game = useBattleship();
+  const { state, timer, lastShot, pending, notice } = game;
+  const [showRules, setShowRules] = useState(false);
+  const [showQuickRules, setShowQuickRules] = useState(() => !quickRulesSeen);
+  const closeRules = useCallback(() => setShowRules(false), []);
 
-  const [showRules, setShowRules] = useState(gameState.isFirstRound);
-  const [endGameConfirm, setEndGameConfirm] = useState(false);
-
-  const { phase, players, isMyTurn, activePlayerId, shotsRemaining, settings, roundNumber } = gameState;
-
-  const activePlayer = players.find(p => p.id === activePlayerId);
-  const myPlayer = players.find(p => p.id === pid);
-  const amAlive = myPlayer?.alive ?? true;
-
-  const handleEndGame = () => {
-    if (!endGameConfirm) {
-      setEndGameConfirm(true);
-      setTimeout(() => setEndGameConfirm(false), 3000);
-      return;
-    }
-    endGame();
-  };
-
-  const handleBackToLobby = () => {
-    endGame();
-  };
-
-  // Rules overlay
-  if (showRules && gameState.isFirstRound && phase === 'placement') {
+  if (!state) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-md mx-auto animate-fade-in" data-game="battleship">
-        <div className="bg-(--bg-card) border border-(--border) rounded-2xl p-6 space-y-4">
-          <h2 className="text-xl font-bold text-(--text-primary) text-center">⚓ How to Play</h2>
-          <div className="space-y-3 text-sm text-(--text-secondary)">
-            <p>Place your fleet of 4 ships on your grid. Your opponents do the same — secretly.</p>
-            <p>Take turns firing at your opponents&apos; grids. Tap a cell to fire.</p>
-            {settings.shotMode === 'salvo' ? (
-              <p>In <strong className="text-(--game-accent)">Salvo mode</strong>, you get shots equal to your surviving ships. As ships sink, you fire fewer shots.</p>
-            ) : (
-              <p>In <strong>Classic mode</strong>, you fire 1 shot per turn.</p>
-            )}
-            <ul className="list-disc list-inside space-y-1 pl-2">
-              <li><span className="text-(--text-muted)">💧</span> Miss — splash, nothing there</li>
-              <li><span className="text-(--danger)">💥</span> Hit — you struck a ship!</li>
-              <li><span className="text-(--game-accent)">🔥</span> Sunk — entire ship destroyed!</li>
-            </ul>
-            {settings.sonarPing && (
-              <p>📡 <strong>Sonar Ping</strong> — once per game, scan a 2×2 area to detect if a ship is hiding there.</p>
-            )}
-            <p>Sink all of an opponent&apos;s ships to eliminate them. Last fleet standing wins!</p>
-          </div>
-          <button
-            onClick={() => setShowRules(false)}
-            className="w-full py-3.5 bg-(--game-accent) text-white rounded-xl font-semibold active:scale-[0.97] transition-all"
-          >
-            Deploy Fleet! ⚓
-          </button>
-        </div>
+      <div className="flex flex-1 items-center justify-center" data-game="battleship">
+        <p className="text-sm text-(--text-secondary) animate-soft-pulse">⚓ Charting the waters…</p>
       </div>
     );
   }
 
-  // Game Over
-  if (phase === 'finished') {
+  const hostName = room ? room.players[room.hostId]?.name ?? 'the host' : 'the host';
+
+  if (state.phase === 'finished') {
+    const online = room ? Object.values(room.players).filter(p => p.connected).length : 0;
     return (
-      <div data-game="battleship">
+      <div data-game="battleship" className="flex flex-1 flex-col">
         <GameOver
-          players={players}
-          myId={pid}
+          players={state.players}
+          eliminationOrder={state.eliminationOrder}
+          winnerId={state.winnerId}
+          turns={state.turnNumber}
+          myId={myId}
           isHost={isHost}
-          onRematch={rematch}
-          onBackToLobby={handleBackToLobby}
+          hostName={hostName}
+          canRematch={online >= BATTLESHIP_MIN_PLAYERS && online <= BATTLESHIP_MAX_PLAYERS}
+          onRematch={game.rematch}
+          onBackToLobby={game.endGame}
           onLeaveRoom={leaveRoom}
         />
       </div>
     );
   }
 
-  // Placement phase
-  if (phase === 'placement') {
-    return (
-      <div className="flex-1 flex flex-col" data-game="battleship">
-        {!connected && (
-          <div className="bg-(--danger)/20 text-(--danger) text-xs text-center py-1.5 px-3">
-            Reconnecting...
-          </div>
-        )}
-        <ShipPlacement
-          gridSize={settings.gridSize}
-          onPlaceShips={placeShips}
-          onAutoPlace={autoPlace}
-          placementTimer={placementTimer}
-          isReady={myPlayer?.ready || false}
-          players={players}
-        />
-      </div>
-    );
-  }
+  const { settings } = state;
+  const modeLabel = settings.shotMode === 'salvo' ? 'Salvo' : 'Classic';
 
-  // Battle phase
   return (
-    <div className="flex-1 flex flex-col max-w-lg mx-auto w-full" data-game="battleship">
-      {!connected && (
-        <div className="bg-(--danger)/20 text-(--danger) text-xs text-center py-1.5 px-3">
-          Reconnecting...
+    <div data-game="battleship" className="mx-auto flex min-h-dvh w-full max-w-lg flex-col bs-table">
+      <header className="flex items-center gap-2 px-4 pb-2 pt-3">
+        <span className="text-xl" aria-hidden="true">⚓</span>
+        <div className="min-w-0">
+          <h1 className="text-sm font-bold leading-tight text-(--text-primary)">Battleship</h1>
+          <p className="truncate text-[11px] text-(--text-muted)">
+            {state.phase === 'placement' ? 'Placing fleets' : `Turn ${state.turnNumber}`} · {settings.gridSize}×{settings.gridSize} · {modeLabel}
+          </p>
         </div>
-      )}
-
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-(--border)/30">
-        <div className="flex items-center gap-2">
-          <span className="text-lg">⚓</span>
-          <div>
-            <h1 className="text-sm font-bold text-(--text-primary) leading-tight">Battleship</h1>
-            <p className="text-[10px] text-(--text-muted)">Round {roundNumber}</p>
-          </div>
-        </div>
-
-        {/* Turn timer */}
-        {turnTimer !== null && phase === 'battle' && (
-          <div className={`text-lg font-mono font-bold px-2.5 py-1 rounded-lg ${
-            turnTimer <= 10
-              ? 'text-(--danger) bg-(--danger)/10 animate-timer-urgent'
-              : 'text-(--text-secondary) bg-(--bg-card)'
-          }`}>
-            {turnTimer}s
-          </div>
-        )}
-
-        {/* Shots remaining badge */}
-        {isMyTurn && shotsRemaining > 0 && (
-          <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-(--game-accent)/10 border border-(--game-accent)/30">
-            <span className="text-xs">🎯</span>
-            <span className="text-sm font-bold text-(--game-accent)">{shotsRemaining}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Turn indicator */}
-      {phase === 'battle' && activePlayer && (
-        <div className={`text-center py-2 ${isMyTurn ? 'bg-(--game-accent)/5' : ''}`}>
-          {isMyTurn ? (
-            <p className="text-sm font-semibold text-(--game-accent)">
-              Your turn — fire at will!
-            </p>
-          ) : (
-            <p className="text-xs text-(--text-muted)">
-              {activePlayer.avatar} {activePlayer.name}&apos;s turn
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Fleet status bar */}
-      <div className="px-4 py-1.5">
-        <FleetStatus players={players} myId={pid} />
-      </div>
-
-      {/* Attack grid + mini-map */}
-      <div className="flex-1 px-3 py-1 overflow-y-auto">
-        <AttackGrid
-          gameState={gameState}
-          myId={pid}
-          onFire={fire}
-          onUseSonar={useSonar}
-          shotResult={shotResult}
-          sonarResult={sonarResult}
-        />
-      </div>
-
-      {/* Spectator message if eliminated */}
-      {!amAlive && (
-        <div className="text-center py-3 px-4 bg-(--bg-card)/50 border-t border-(--border)/30">
-          <p className="text-sm text-(--text-muted)">☠️ Your fleet is destroyed — watching the battle</p>
-        </div>
-      )}
-
-      {/* Host controls */}
-      {isHost && (
-        <div className="px-4 pb-3 pt-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <button
-            onClick={handleEndGame}
-            className={`w-full py-2.5 rounded-xl text-xs transition-all ${
-              endGameConfirm
-                ? 'bg-(--danger) text-white'
-                : 'text-(--text-muted) border border-(--border)'
-            }`}
+            type="button"
+            onClick={() => setShowRules(true)}
+            aria-label="How to play"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-(--border) bg-(--bg-card) text-sm font-bold text-(--text-secondary) active:scale-95"
           >
-            {endGameConfirm ? 'Tap again to end game' : 'End Game'}
+            ?
           </button>
+          {isHost && <EndGameButton onConfirm={game.endGame} />}
+        </div>
+      </header>
+
+      <main className="flex flex-1 flex-col">
+        {state.phase === 'placement' ? (
+          <ShipPlacement state={state} myId={myId} timer={timer} sending={pending === 'fleet'} onDeploy={game.placeShips} />
+        ) : (
+          <AttackGrid
+            state={state}
+            myId={myId}
+            timer={timer}
+            lastShot={lastShot}
+            pending={pending}
+            onFire={game.fire}
+            onSonar={game.sonarPing}
+          />
+        )}
+      </main>
+
+      {notice && (
+        <div
+          key={notice.id}
+          role="alert"
+          className="fixed left-1/2 top-16 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl border border-(--danger)/40 bg-(--bg-elevated) px-4 py-2 text-center text-sm text-(--text-primary) shadow-lg animate-slide-up"
+        >
+          {notice.text}
         </div>
       )}
+
+      {showQuickRules && state.phase === 'placement' && state.inGame && (
+        <QuickRules
+          settings={settings}
+          onClose={() => {
+            quickRulesSeen = true;
+            setShowQuickRules(false);
+          }}
+        />
+      )}
+      {showRules && <RulesSheet gameId="battleship" onClose={closeRules} />}
     </div>
   );
 }

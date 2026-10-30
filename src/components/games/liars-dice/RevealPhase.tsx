@@ -1,272 +1,202 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import type { ChallengeResult, LiarsDicePlayerInfo, LiarsDiceSettings } from '@/types/games/liars-dice';
-import { DIE_FACE_LABELS } from '@/types/games/liars-dice';
-import DiceIcon from './DiceIcon';
+import { useEffect, useRef, useState } from 'react';
+import type { ChallengeResult, LiarsDicePhase, LiarsDicePlayerInfo, LiarsDiceSettings } from '@/types/games/liars-dice';
+import { LD_REVEAL_INTRO_MS, LD_REVEAL_ROW_MS, LD_ROUND_END_MS, countMatches } from '@/types/games/liars-dice';
 import Confetti from '@/components/shared/Confetti';
+import DiceIcon from './DiceIcon';
+import { Hearts } from './PlayerRing';
 
 interface RevealPhaseProps {
   result: ChallengeResult;
   players: LiarsDicePlayerInfo[];
+  phase: LiarsDicePhase;          // 'challenge' while counting, 'roundEnd' once lives are taken
   myId: string | null;
   settings: LiarsDiceSettings;
 }
 
-export default function RevealPhase({ result, players, myId, settings }: RevealPhaseProps) {
-  const [phase, setPhase] = useState<'announcement' | 'counting' | 'result'>('announcement');
-  const [revealedPlayers, setRevealedPlayers] = useState<number>(0);
-  const [runningCount, setRunningCount] = useState(0);
-  const [showResult, setShowResult] = useState(false);
+const VERDICT_GAP_MS = 350;
 
-  const iWon = result.type === 'liar'
-    ? result.loserId !== myId
-    : result.type === 'spotOn' && result.wasCorrect
-      ? result.callerId === myId
-      : result.loserId !== myId;
+/** Every die is revealed one player at a time, counted against the claim, then the verdict lands. */
+export default function RevealPhase({ result, players, phase, myId, settings }: RevealPhaseProps) {
+  const rows = players.filter(p => result.allDice[p.id]);
+  const face = result.bid.faceValue;
+  const verdictAt = LD_REVEAL_INTRO_MS + rows.length * LD_REVEAL_ROW_MS + VERDICT_GAP_MS;
 
-  const callerPlayer = players.find(p => p.id === result.callerId);
-  const bidderPlayer = players.find(p => p.id === result.bidderId);
-  const bidFace = result.bid.faceValue;
+  const [revealed, setRevealed] = useState(0);
+  const [showVerdict, setShowVerdict] = useState(false);
 
-  // A die counts toward the bid if it matches the face value,
-  // OR if wild ones is on and it's a 1 (and bid isn't for 1s)
-  const dieCountsForBid = (val: number) => {
-    if (val === bidFace) return true;
-    if (settings.wildOnes && val === 1 && bidFace !== 1) return true;
-    return false;
-  };
-
-  // Get ordered player list for reveal
-  const revealPlayers = players.filter(p => p.alive || result.allDice[p.id]);
-  const playerDiceEntries = revealPlayers
-    .map(p => ({ player: p, dice: result.allDice[p.id] || [] }))
-    .filter(e => e.dice.length > 0);
-
-  // Staggered reveal animation
   useEffect(() => {
-    // Phase 1: Announcement (1.5s dramatic pause)
-    const announcementTimer = setTimeout(() => {
-      setPhase('counting');
-    }, 1500);
-
-    return () => clearTimeout(announcementTimer);
+    const timers = rows.map((_, i) => setTimeout(() => setRevealed(i + 1), LD_REVEAL_INTRO_MS + i * LD_REVEAL_ROW_MS));
+    timers.push(setTimeout(() => setShowVerdict(true), verdictAt));
+    return () => timers.forEach(clearTimeout);
+    // Runs once per reveal (the component is keyed by round)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Phase 2: Staggered player dice reveal
+  // Joining mid-way (reconnect during the round end): show everything at once
+  const settled = showVerdict || phase === 'roundEnd';
+
+  // On short screens the verdict lands below the fold: bring it into view
+  const outcomeRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (phase !== 'counting') return;
+    if (!settled) return;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    outcomeRef.current?.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+  }, [settled, phase]);
+  const revealedCount = settled ? rows.length : revealed;
+  const found = rows
+    .slice(0, revealedCount)
+    .reduce((sum, p) => sum + countMatches(result.allDice[p.id], face, settings.wildOnes), 0);
+  const target = result.bid.quantity;
 
-    const timers: ReturnType<typeof setTimeout>[] = [];
+  const caller = players.find(p => p.id === result.callerId);
+  const bidder = players.find(p => p.id === result.bidderId);
+  const name = (id: string, fallback: string) => (id === myId ? 'You' : players.find(p => p.id === id)?.name ?? fallback);
+  const loserNames = result.loserIds.map(id => name(id, 'Someone'));
 
-    playerDiceEntries.forEach((entry, index) => {
-      const timer = setTimeout(() => {
-        setRevealedPlayers(index + 1);
-        // Count matching dice for this player
-        const matchCount = entry.dice.filter(d => dieCountsForBid(d)).length;
-        setRunningCount(prev => prev + matchCount);
-      }, (index + 1) * 800); // 800ms between each player reveal
-      timers.push(timer);
-    });
+  const iLose = !!myId && result.loserIds.includes(myId);
+  const iWonChallenge = !!myId && !iLose && (myId === result.callerId || myId === result.bidderId);
 
-    // After all revealed, show result
-    const resultTimer = setTimeout(() => {
-      setPhase('result');
-      setShowResult(true);
-    }, (playerDiceEntries.length + 1) * 800 + 500);
-    timers.push(resultTimer);
-
-    return () => timers.forEach(t => clearTimeout(t));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
+  let verdict: string;
+  if (result.type === 'liar') {
+    verdict = result.wasCorrect
+      ? `Bluff caught! ${loserNames[0]} lose${loserNames[0] === 'You' ? '' : 's'} a ❤️`
+      : `The bid was true! ${loserNames[0]} lose${loserNames[0] === 'You' ? '' : 's'} a ❤️`;
+  } else {
+    verdict = result.wasCorrect
+      ? 'Spot on! Everyone else loses a ❤️'
+      : `Not exact. ${loserNames[0]} lose${loserNames[0] === 'You' ? '' : 's'} a ❤️`;
+  }
 
   return (
-    <div className="flex-1 flex flex-col items-center gap-4 p-4 overflow-y-auto" data-game="liars-dice">
-      {showResult && iWon && <Confetti />}
+    <div className="flex flex-1 flex-col px-4">
+      {settled && iWonChallenge && <Confetti />}
 
-      {/* Phase 1: Dramatic announcement */}
-      <div className={`text-center pt-4 transition-all duration-300 ${
-        phase === 'announcement' ? 'animate-slam-in' : ''
-      }`}>
-        {result.type === 'liar' ? (
-          <div className="space-y-2">
-            <p className="text-sm text-(--text-secondary)">
-              {callerPlayer?.avatar} {callerPlayer?.name}
-            </p>
-            <h2 className="text-3xl font-black text-(--danger) tracking-tight animate-shake-once">
-              LIAR!
-            </h2>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-sm text-(--text-secondary)">
-              {callerPlayer?.avatar} {callerPlayer?.name}
-            </p>
-            <h2 className="text-3xl font-black text-(--game-secondary) tracking-tight">
-              SPOT ON!
-            </h2>
-          </div>
-        )}
+      {/* The call */}
+      <div className="pt-3 text-center">
+        <p className="text-sm text-(--text-secondary) animate-fade-in">
+          <span aria-hidden="true">{caller?.avatar}</span> {name(result.callerId, result.callerName)}
+          {result.auto && <span className="text-(--text-muted)"> (out of time)</span>}
+        </p>
+        <h2
+          className={`font-heading text-4xl font-bold tracking-tight animate-slam-in ${
+            result.type === 'liar' ? 'text-(--danger)' : 'text-(--game-secondary)'
+          }`}
+        >
+          {result.type === 'liar' ? 'LIAR!' : 'SPOT ON!'}
+        </h2>
       </div>
 
-      {/* Bid being challenged — always visible */}
-      <div className="bg-(--bg-card) border border-(--border) rounded-xl px-5 py-3 flex items-center gap-3 justify-center">
-        <span className="text-xs text-(--text-muted)">Claim:</span>
-        <span className="text-2xl font-bold text-(--text-primary)">{result.bid.quantity}</span>
-        <span className="text-lg text-(--text-muted)">×</span>
-        <DiceIcon value={bidFace} size={32} />
-        <span className="text-xs text-(--text-muted)">by {bidderPlayer?.name}</span>
+      {/* The claim */}
+      <div className="mx-auto mt-3 flex items-center gap-2 rounded-2xl border border-(--border-light) bg-(--bg-card) px-4 py-2.5">
+        <span className="text-xs text-(--text-muted)">
+          <span aria-hidden="true">{bidder?.avatar}</span> {name(result.bidderId, result.bidderName)} said {result.type === 'spotOn' ? 'exactly' : 'at least'}
+        </span>
+        <span className="font-heading text-2xl font-bold tabular-nums text-(--text-primary)">{target}</span>
+        <span className="text-(--text-muted)" aria-hidden="true">×</span>
+        <DiceIcon value={face} size={30} wild={settings.wildOnes} />
       </div>
 
-      {/* Phase 2: Staggered dice reveal with running count */}
-      {phase !== 'announcement' && (
-        <div className="w-full max-w-sm space-y-2 animate-fade-in">
-          {/* Running count header */}
-          <div className="flex items-center justify-between px-1">
-            <p className="text-[10px] uppercase tracking-wider text-(--text-muted)">Revealing dice...</p>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-(--text-muted)">Found:</span>
-              <span className={`text-lg font-bold transition-all duration-300 ${
-                runningCount >= result.bid.quantity ? 'text-(--success) scale-110' : 'text-(--text-primary)'
-              }`}>
-                {runningCount}
-              </span>
-              <span className="text-xs text-(--text-muted)">/ {result.bid.quantity}</span>
-            </div>
-          </div>
+      {/* Running count */}
+      <div className="mt-4" role="status" aria-live="polite">
+        <div className="mb-1.5 flex items-baseline justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
+            {settled ? 'Counted' : 'Counting…'}
+            {settings.wildOnes && face !== 1 && <span className="normal-case tracking-normal"> · 1s are wild</span>}
+          </p>
+          <p className="font-heading text-lg font-bold tabular-nums">
+            <span key={found} className={`inline-block ld-bump ${found >= target ? 'text-(--success)' : 'text-(--text-primary)'}`}>{found}</span>
+            <span className="text-sm text-(--text-muted)"> / {target}</span>
+          </p>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-(--bg-elevated)">
+          <div
+            className="h-full rounded-full transition-[width] duration-300"
+            style={{
+              width: `${Math.min(100, (found / Math.max(1, target)) * 100)}%`,
+              background: found >= target ? 'var(--success)' : 'var(--game-secondary)',
+            }}
+          />
+        </div>
+      </div>
 
-          {/* Player dice rows — revealed one by one */}
-          {playerDiceEntries.map((entry, index) => {
-            const isRevealed = index < revealedPlayers;
-            const isLoser = entry.player.id === result.loserId ||
-              (result.losersIfSpotOn?.includes(entry.player.id) ?? false);
-
-            if (!isRevealed) {
-              // Unrevealed — show hidden placeholder
-              return (
-                <div
-                  key={entry.player.id}
-                  className="rounded-xl p-2.5 flex items-center gap-2 bg-(--bg-elevated)/50 border border-(--border)/50"
-                >
-                  <div className="flex flex-col items-center min-w-[44px]">
-                    <span className="text-lg">{entry.player.avatar}</span>
-                    <span className="text-[10px] text-(--text-muted) truncate max-w-[44px]">
-                      {entry.player.id === myId ? 'You' : entry.player.name}
-                    </span>
-                  </div>
-                  <div className="flex gap-1.5 flex-1 justify-end">
-                    {entry.dice.map((_, i) => (
-                      <DiceIcon key={i} value={1} size={28} hidden />
-                    ))}
-                  </div>
-                </div>
-              );
-            }
-
-            // Revealed — show actual dice with stagger
-            return (
-              <div
-                key={entry.player.id}
-                className={`rounded-xl p-2.5 flex items-center gap-2 transition-all animate-fade-in ${
-                  isLoser && showResult
-                    ? 'bg-(--danger)/10 border border-(--danger)/20'
-                    : 'bg-(--bg-elevated) border border-(--border)'
+      {/* Everyone's dice */}
+      <ul className="mt-3 space-y-1.5">
+        {rows.map((p, i) => {
+          const dice = result.allDice[p.id];
+          const shown = i < revealedCount;
+          const count = countMatches(dice, face, settings.wildOnes);
+          const loser = settled && result.loserIds.includes(p.id);
+          return (
+            <li
+              key={p.id}
+              className={`flex items-center gap-2 rounded-2xl border px-2.5 py-2 transition-colors duration-300 ${
+                loser ? 'border-(--danger)/35 bg-(--danger-dim)' : 'border-(--border) bg-(--bg-card)'
+              } ${loser && phase === 'roundEnd' ? 'animate-shake-once' : ''}`}
+            >
+              <span className="text-lg" aria-hidden="true">{p.avatar}</span>
+              <div className="w-14 min-w-0">
+                <p className="truncate text-xs font-semibold text-(--text-primary)">{p.id === myId ? 'You' : p.name}</p>
+                {phase === 'roundEnd' ? (
+                  p.alive ? <Hearts lives={p.lives} max={p.maxLives} /> : <span className="text-[10px] font-bold text-(--danger)">💀 Out</span>
+                ) : (
+                  p.left && <span className="text-[10px] text-(--text-muted)">left</span>
+                )}
+              </div>
+              <div className="flex flex-1 justify-end gap-1">
+                {dice.map((v, j) => (
+                  <DiceIcon
+                    key={`${j}-${shown}`}
+                    value={v}
+                    size={28}
+                    hidden={!shown}
+                    wild={settings.wildOnes}
+                    highlighted={shown && countMatches([v], face, settings.wildOnes) > 0}
+                    dim={shown && countMatches([v], face, settings.wildOnes) === 0}
+                    className={shown ? 'animate-dice-reveal' : ''}
+                    style={shown ? { animationDelay: `${j * 45}ms` } : undefined}
+                  />
+                ))}
+              </div>
+              <span
+                className={`w-6 text-right font-heading text-sm font-bold tabular-nums ${
+                  !shown ? 'text-(--text-muted)' : count > 0 ? 'text-(--game-accent)' : 'text-(--text-muted)'
                 }`}
               >
-                <div className="flex flex-col items-center min-w-[44px]">
-                  <span className="text-lg">{entry.player.avatar}</span>
-                  <span className="text-[10px] text-(--text-secondary) truncate max-w-[44px]">
-                    {entry.player.id === myId ? 'You' : entry.player.name}
-                  </span>
-                </div>
-                <div className="flex gap-1.5 flex-1 justify-end flex-wrap">
-                  {entry.dice.map((val, i) => (
-                    <div
-                      key={i}
-                      style={{ animationDelay: `${i * 150}ms` }}
-                      className="animate-dice-reveal"
-                    >
-                      <DiceIcon
-                        value={val}
-                        size={28}
-                        highlighted={dieCountsForBid(val)}
-                        wild={settings.wildOnes}
-                      />
-                    </div>
-                  ))}
-                </div>
-                {/* Match count for this player */}
-                <div className="flex flex-col items-center min-w-[24px]">
-                  <span className={`text-sm font-bold ${
-                    entry.dice.filter(d => dieCountsForBid(d)).length > 0
-                      ? 'text-(--game-accent)'
-                      : 'text-(--text-muted)'
-                  }`}>
-                    {entry.dice.filter(d => dieCountsForBid(d)).length}
-                  </span>
-                </div>
-                {isLoser && showResult && <span className="text-sm shrink-0">💔</span>}
-              </div>
-            );
-          })}
+                {shown ? count : '·'}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div ref={outcomeRef} className="ld-safe-bottom">
+      {/* Verdict */}
+      {settled && (
+        <div
+          className={`mt-4 rounded-2xl border px-4 py-3 text-center ld-verdict ${
+            result.wasCorrect ? 'border-(--success)/30 bg-(--success-dim)' : 'border-(--danger)/30 bg-(--danger-dim)'
+          }`}
+        >
+          <p className="font-heading text-lg font-bold text-(--text-primary)">
+            {result.actualCount} {result.actualCount === 1 ? 'die' : 'dice'} vs {target} claimed
+          </p>
+          <p className={`mt-0.5 text-sm font-semibold ${result.wasCorrect ? 'text-(--success)' : 'text-(--danger)'}`}>{verdict}</p>
+          {iLose && <p className="mt-1 text-sm text-(--text-secondary)">💔 That one hurts</p>}
+          {iWonChallenge && <p className="mt-1 text-sm text-(--text-secondary)">🎉 You won that challenge</p>}
         </div>
       )}
 
-      {/* Phase 3: Final result */}
-      {showResult && (
-        <div className={`text-center py-3 px-5 rounded-xl w-full max-w-sm animate-celebrate ${
-          result.wasCorrect ? 'bg-(--success)/10 border border-(--success)/20' : 'bg-(--danger)/10 border border-(--danger)/20'
-        }`}>
-          {/* Big verdict */}
-          <div className="mb-2">
-            <div className="flex items-center justify-center gap-3">
-              <span className={`text-3xl font-bold ${
-                result.actualCount >= result.bid.quantity ? 'text-(--success)' : 'text-(--danger)'
-              }`}>
-                {result.actualCount}
-              </span>
-              <span className="text-lg text-(--text-muted)">vs</span>
-              <span className="text-3xl font-bold text-(--text-primary)">
-                {result.bid.quantity}
-              </span>
-            </div>
-            <p className="text-xs text-(--text-muted) mt-1">
-              actual {DIE_FACE_LABELS[bidFace]} vs claimed
-              {settings.wildOnes && bidFace !== 1 && ' (incl. wild ⚀)'}
-            </p>
+      {phase === 'roundEnd' && (
+        <div className="mt-3" role="status">
+          <p className="mb-1.5 text-center text-xs text-(--text-muted)">Next round coming up…</p>
+          <div className="h-1 overflow-hidden rounded-full bg-(--bg-elevated)">
+            <div className="ld-drain h-full rounded-full bg-(--game-accent)" style={{ animationDuration: `${LD_ROUND_END_MS}ms` }} />
           </div>
-
-          {result.type === 'liar' && (
-            result.wasCorrect ? (
-              <p className="text-base font-bold text-(--success)">
-                ✅ The bid was a lie! {result.loserName} loses a ❤️
-              </p>
-            ) : (
-              <p className="text-base font-bold text-(--danger)">
-                ❌ The bid was true! {result.loserName} loses a ❤️
-              </p>
-            )
-          )}
-
-          {result.type === 'spotOn' && (
-            result.wasCorrect ? (
-              <p className="text-base font-bold text-(--success)">
-                🎯 Spot on! Everyone else loses a ❤️
-              </p>
-            ) : (
-              <p className="text-base font-bold text-(--danger)">
-                ❌ Not exact! {result.loserName} loses a ❤️
-              </p>
-            )
-          )}
-
-          {myId && (
-            <p className="text-sm text-(--text-secondary) mt-1">
-              {iWon ? '🎉 You survived this round!' : '😅 Better luck next time!'}
-            </p>
-          )}
         </div>
       )}
+      </div>
     </div>
   );
 }

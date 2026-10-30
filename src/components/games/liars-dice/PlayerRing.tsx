@@ -1,129 +1,102 @@
 'use client';
 
-import type { LiarsDicePlayerInfo } from '@/types/games/liars-dice';
-import { LIVES_DISPLAY } from '@/types/games/liars-dice';
+import { useEffect, useRef } from 'react';
+import type { LiarsDicePhase, LiarsDicePlayerInfo, LiarsDiceTurnTimer } from '@/types/games/liars-dice';
+
+export function Hearts({ lives, max, size = 'sm' }: { lives: number; max: number; size?: 'sm' | 'md' }) {
+  return (
+    <span className={`ld-hearts ${size === 'md' ? 'text-base' : 'text-[11px]'}`} aria-label={`${lives} of ${max} lives`}>
+      {Array.from({ length: max }, (_, i) => (
+        <span key={`${i}-${i < lives}`} className={i < lives ? 'ld-heart' : 'ld-heart ld-heart-lost animate-life-lost'} aria-hidden="true">
+          ♥
+        </span>
+      ))}
+    </span>
+  );
+}
 
 interface PlayerRingProps {
   players: LiarsDicePlayerInfo[];
+  phase: LiarsDicePhase;
   activePlayerId: string | null;
   myId: string | null;
-  totalDiceOnTable: number;
+  timer: LiarsDiceTurnTimer | null;
 }
 
-export default function PlayerRing({ players, activePlayerId, myId, totalDiceOnTable }: PlayerRingProps) {
-  const alivePlayers = players.filter(p => p.alive);
-  const eliminatedPlayers = players.filter(p => !p.alive);
-
-  // Find who's next after active player
-  const activeIndex = alivePlayers.findIndex(p => p.id === activePlayerId);
-  const nextPlayerId = activeIndex >= 0
-    ? alivePlayers[(activeIndex + 1) % alivePlayers.length]?.id
+/** Everyone at the table in turn order (clockwise), with lives and whose turn it is. */
+export default function PlayerRing({ players, phase, activePlayerId, myId, timer }: PlayerRingProps) {
+  const listRef = useRef<HTMLOListElement>(null);
+  const inGame = players.filter(p => p.alive);
+  const activeIndex = inGame.findIndex(p => p.id === activePlayerId);
+  const nextId = phase === 'bidding' && activeIndex >= 0 && inGame.length > 2
+    ? inGame[(activeIndex + 1) % inGame.length].id
     : null;
 
+  // Keep whoever is on turn in view
+  useEffect(() => {
+    listRef.current
+      ?.querySelector('[data-active="true"]')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }, [activePlayerId]);
+
   return (
-    <div className="flex flex-col items-center gap-2 px-2">
-      {/* Total dice on table — critical strategic info */}
-      <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-(--bg-primary)/60 border border-(--border)">
-        <span className="text-[10px] text-(--text-muted) uppercase tracking-wider">Table</span>
-        <span className="text-sm font-bold text-(--text-primary)">{totalDiceOnTable}</span>
-        <span className="text-[10px] text-(--text-muted)">🎲</span>
-      </div>
+    <ol
+      ref={listRef}
+      className="no-scrollbar flex snap-x items-stretch gap-1 overflow-x-auto px-3 pb-1 pt-2"
+      aria-label="Players in turn order"
+    >
+      {players.map((p, i) => {
+        const isActive = phase === 'bidding' && p.id === activePlayerId;
+        const isMe = p.id === myId;
+        const out = !p.alive;
+        const myTimer = isActive && timer?.playerId === p.id ? timer : null;
+        let tag: string | null = null;
+        if (p.left) tag = 'left';
+        else if (!p.connected && !out) tag = 'away';
+        else if (phase === 'rolling' && !out) tag = p.rolled ? '✓ rolled' : 'rolling…';
+        else if (p.id === nextId) tag = 'next';
 
-      {/* Turn order row — alive players */}
-      <div className="flex items-center justify-center gap-1 flex-wrap">
-        {alivePlayers.map((player, i) => {
-          const isActive = player.id === activePlayerId;
-          const isMe = player.id === myId;
-          const isNext = player.id === nextPlayerId && !isActive;
-
-          return (
-            <div key={player.id} className="flex items-center gap-1">
-              <div
-                className={`
-                  relative flex flex-col items-center px-2.5 py-1.5 rounded-xl transition-all min-w-[68px]
-                  ${isActive
-                    ? 'bg-(--bg-elevated) ring-2 ring-(--game-accent) animate-glow-pulse scale-105'
-                    : isNext
-                      ? 'bg-(--bg-card) border border-(--border-light) ring-1 ring-(--text-muted)/20'
-                      : 'bg-(--bg-card) border border-(--border)'
-                  }
-                  ${isMe && !isActive ? 'ring-1 ring-(--brand)/40' : ''}
-                `}
-              >
-                {/* "Next" indicator */}
-                {isNext && (
-                  <span className="absolute -top-1.5 right-1 text-[8px] text-(--text-muted) bg-(--bg-card) px-1 rounded">
-                    next
-                  </span>
-                )}
-
-                {/* Avatar */}
-                <span className="text-lg leading-none">{player.avatar}</span>
-
-                {/* Name */}
-                <span className={`text-[10px] mt-0.5 truncate max-w-[56px] ${
-                  isMe ? 'text-(--brand) font-medium' : player.connected ? 'text-(--text-primary)' : 'text-(--text-muted)'
+        return (
+          <li key={p.id} className="flex shrink-0 snap-center items-stretch gap-1">
+            {i > 0 && <span className="self-center text-[10px] text-(--text-muted)" aria-hidden="true">›</span>}
+            <div
+              data-active={isActive ? 'true' : undefined}
+              className={`ld-seat relative flex min-h-[76px] w-[62px] flex-col items-center justify-center rounded-2xl px-1 pb-1.5 pt-1.5 ${
+                isActive ? 'ld-seat-active' : ''
+              } ${out ? 'animate-elimination' : ''}`}
+              aria-current={isActive ? 'step' : undefined}
+            >
+              <span className="text-xl leading-none" aria-hidden="true">{p.avatar}</span>
+              <span className={`mt-1 max-w-full truncate text-[11px] font-semibold ${isMe ? 'text-(--brand)' : 'text-(--text-primary)'}`}>
+                {isMe ? 'You' : p.name}
+              </span>
+              {out ? (
+                <span className="text-[11px] leading-4" aria-label="Out">💀</span>
+              ) : (
+                <Hearts lives={p.lives} max={p.maxLives} />
+              )}
+              {tag && (
+                <span className={`mt-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+                  tag === 'away' || tag === 'left' ? 'text-(--danger)' : tag === '✓ rolled' ? 'text-(--success)' : 'text-(--text-muted)'
                 }`}>
-                  {isMe ? 'You' : player.name}
+                  {tag}
                 </span>
-
-                {/* Dice count — BIG and prominent */}
-                <div className="flex items-center gap-0.5 mt-0.5">
-                  <span className="text-[10px]">🎲</span>
-                  <span className={`text-sm font-bold ${
-                    player.diceCount <= 2 ? 'text-(--danger)' : 'text-(--text-primary)'
-                  }`}>
-                    {player.diceCount}
-                  </span>
-                </div>
-
-                {/* Lives */}
-                <div className="flex gap-0.5 mt-0.5">
-                  {Array.from({ length: player.maxLives }, (_, j) => (
-                    <span
-                      key={j}
-                      className={`text-[10px] ${j < player.lives ? '' : 'animate-life-lost'}`}
-                    >
-                      {j < player.lives ? LIVES_DISPLAY.full : LIVES_DISPLAY.lost}
-                    </span>
-                  ))}
-                </div>
-
-                {/* Connection status */}
-                {!player.connected && (
-                  <span className="text-[8px] text-(--text-muted)">offline</span>
-                )}
-
-                {/* Last life warning */}
-                {player.lives === 1 && (
-                  <span className="text-[8px] text-(--danger) animate-pulse mt-0.5">💀</span>
-                )}
-              </div>
-
-              {/* Arrow to next player (not after last) */}
-              {i < alivePlayers.length - 1 && (
-                <span className="text-[10px] text-(--text-muted)">→</span>
               )}
-              {/* Wrap arrow from last to first */}
-              {i === alivePlayers.length - 1 && alivePlayers.length > 1 && (
-                <span className="text-[10px] text-(--text-muted)">↩</span>
+              {myTimer && myTimer.total > 0 && (
+                <span className="absolute inset-x-2 bottom-0.5 h-[3px] overflow-hidden rounded-full bg-(--bg-primary)/60" aria-hidden="true">
+                  <span
+                    className="block h-full rounded-full transition-[width] duration-1000 ease-linear"
+                    style={{
+                      width: `${(myTimer.secondsLeft / myTimer.total) * 100}%`,
+                      background: myTimer.secondsLeft <= 5 ? 'var(--danger)' : 'var(--game-secondary)',
+                    }}
+                  />
+                </span>
               )}
             </div>
-          );
-        })}
-      </div>
-
-      {/* Eliminated players — small row below */}
-      {eliminatedPlayers.length > 0 && (
-        <div className="flex items-center gap-2 opacity-40">
-          {eliminatedPlayers.map((player) => (
-            <div key={player.id} className="flex items-center gap-1 text-[10px] text-(--text-muted)">
-              <span>☠️</span>
-              <span>{player.id === myId ? 'You' : player.name}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

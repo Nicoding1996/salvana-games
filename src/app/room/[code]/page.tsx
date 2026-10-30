@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useRoom } from '@/lib/hub/useRoom';
 import Lobby from '@/components/hub/Lobby';
@@ -10,47 +10,48 @@ import BattleshipGame from '@/components/games/battleship/BattleshipGame';
 import PokerGame from '@/components/games/poker/PokerGame';
 import Flip7Game from '@/components/games/flip7/Flip7Game';
 
+// ---- The name + room this tab last joined with (sessionStorage) ----
+// Read through useSyncExternalStore: null while prerendering, the real value once hydrated.
+
+function subscribeSession(onChange: () => void): () => void {
+  window.addEventListener('storage', onChange);
+  return () => window.removeEventListener('storage', onChange);
+}
+
+function readSession(): string {
+  return `${sessionStorage.getItem('playerName') ?? ''}\n${sessionStorage.getItem('roomCode') ?? ''}`;
+}
+
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
   const roomHook = useRoom();
   const { room, playerId, connected, joinRoom, error, setError } = roomHook;
   const attemptedJoin = useRef(false);
-  const [needsName, setNeedsName] = useState(false);
+  const [joinFailed, setJoinFailed] = useState(false);
   const [name, setName] = useState('');
   const [joining, setJoining] = useState(false);
 
   const code = typeof params.code === 'string' ? params.code.toUpperCase() : '';
+  const session = useSyncExternalStore(subscribeSession, readSession, () => null);
+  const [storedName, storedCode] = session === null ? ['', ''] : session.split('\n');
+  const hasSession = !!storedName && storedCode === code;
+
+  // Direct link / QR join (no session for this room), or the automatic rejoin failed
+  const needsName = !room && session !== null && (!hasSession || joinFailed);
 
   useEffect(() => {
-    if (!connected || attemptedJoin.current) return;
-
-    // Already have room state (from navigation, reconnect handler, or previous join)
+    if (!connected || attemptedJoin.current || !hasSession) return;
     if (room && room.code === code) return;
 
-    // Check if we have session data — the socket connect handler in useRoom
-    // will auto-rejoin, so just wait a moment for it
-    const storedName = typeof window !== 'undefined' ? sessionStorage.getItem('playerName') : null;
-    const storedCode = typeof window !== 'undefined' ? sessionStorage.getItem('roomCode') : null;
-
-    if (storedName && storedCode === code) {
-      // Session data matches this room — the connect handler should auto-rejoin
-      // Wait briefly for it, then check if we got room state
-      attemptedJoin.current = true;
-      const timeout = setTimeout(() => {
-        // If still no room after 2 seconds, try joining explicitly
-        if (!roomHook.room) {
-          joinRoom(code, storedName).catch(() => {
-            setNeedsName(true);
-          });
-        }
-      }, 2000);
-      return () => clearTimeout(timeout);
-    } else if (!storedName || storedCode !== code) {
-      // No session data or different room — show name input
-      setNeedsName(true);
-    }
-  }, [connected, room, code, joinRoom, router, roomHook.room]);
+    // The socket's connect handler in useRoom rejoins automatically. If no room
+    // arrives within 2 seconds, join explicitly.
+    attemptedJoin.current = true;
+    const timeout = setTimeout(() => {
+      joinRoom(code, storedName).catch(() => setJoinFailed(true));
+    }, 2000);
+    return () => clearTimeout(timeout);
+  }, [connected, room, code, joinRoom, hasSession, storedName]);
 
   const handleJoin = async () => {
     if (!name.trim() || !code) return;
@@ -58,11 +59,21 @@ export default function RoomPage() {
     setError(null);
     try {
       await joinRoom(code, name.trim());
-      setNeedsName(false);
+      setJoinFailed(false);
     } catch {
+      // error is shown from roomHook.error
+    } finally {
       setJoining(false);
     }
   };
+
+  // Leaving from inside a game goes back to the home page, like the lobby's Leave button
+  const { leaveRoom } = roomHook;
+  const leaveToHome = useCallback(() => {
+    leaveRoom();
+    router.push('/');
+  }, [leaveRoom, router]);
+  const gameRoomHook = { ...roomHook, leaveRoom: leaveToHome };
 
   // Show name input for direct link / QR code joins
   if (needsName && !room) {
@@ -109,6 +120,11 @@ export default function RoomPage() {
   if (!room) {
     return (
       <div className="flex-1 flex items-center justify-center">
+        {!connected && (
+          <div className="fixed top-0 left-0 right-0 bg-(--danger)/90 text-white text-xs text-center py-1.5 z-50 animate-soft-pulse">
+            Reconnecting...
+          </div>
+        )}
         <div className="text-center animate-fade-in">
           <div className="text-4xl mb-4">{connected ? '⏳' : '🔌'}</div>
           <p className="text-(--text-secondary)">{connected ? `Joining room ${code}...` : 'Connecting...'}</p>
@@ -116,6 +132,8 @@ export default function RoomPage() {
       </div>
     );
   }
+
+  const inGame = room.phase === 'playing' || room.phase === 'finished';
 
   // Main content
   return (
@@ -126,16 +144,16 @@ export default function RoomPage() {
         </div>
       )}
 
-      {(room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'story-thief' ? (
-        <StoryThiefGame room={room} playerId={playerId!} isHost={roomHook.isHost} onLeaveRoom={roomHook.leaveRoom} />
-      ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'liars-dice' ? (
-        <LiarsDiceGame roomHook={roomHook} />
-      ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'battleship' ? (
-        <BattleshipGame roomHook={roomHook} />
-      ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'poker' ? (
-        <PokerGame roomHook={roomHook} />
-      ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'flip7' ? (
-        <Flip7Game roomHook={roomHook} />
+      {inGame && room.currentGameId === 'story-thief' ? (
+        <StoryThiefGame room={room} playerId={playerId!} isHost={roomHook.isHost} onLeaveRoom={leaveToHome} />
+      ) : inGame && room.currentGameId === 'liars-dice' ? (
+        <LiarsDiceGame roomHook={gameRoomHook} />
+      ) : inGame && room.currentGameId === 'battleship' ? (
+        <BattleshipGame roomHook={gameRoomHook} />
+      ) : inGame && room.currentGameId === 'poker' ? (
+        <PokerGame roomHook={gameRoomHook} />
+      ) : inGame && room.currentGameId === 'flip7' ? (
+        <Flip7Game roomHook={gameRoomHook} />
       ) : (
         <Lobby roomHook={roomHook} />
       )}

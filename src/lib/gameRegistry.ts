@@ -77,7 +77,7 @@ export const GAME_REGISTRY: GameDefinition[] = [
     icon: '🎲',
     tagline: 'Shake, bid, bluff.',
     hook: "Shake your phone to roll. Bid on everyone's hidden dice — or call someone a liar.",
-    howToPlay: "Everyone secretly rolls 5 dice. Take turns bidding on the total count of a face value across ALL players. Think someone's lying? Call LIAR! Wrong caller loses a heart. Last one standing wins.",
+    howToPlay: "Everyone secretly rolls 5 dice. Take turns bidding on the total count of a face value across ALL players. Think someone's lying? Call LIAR! Whoever was wrong loses a heart. Last one standing wins.",
     minPlayers: 2,
     maxPlayers: 6,
     duration: '10–15 min',

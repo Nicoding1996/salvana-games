@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import type { useRoom } from '@/lib/hub/useRoom';
 import type { RoundMode } from '@/types/hub';
 import { AVATARS } from '@/types/hub';
+import { MIN_TEAM_SIZE } from '@/types/games/story-thief';
 import type { LiarsDiceSettings } from '@/types/games/liars-dice';
 import { DEFAULT_LIARS_DICE_SETTINGS } from '@/types/games/liars-dice';
 import type { BattleshipSettings } from '@/types/games/battleship';
@@ -100,10 +101,16 @@ export default function Lobby({ roomHook }: LobbyProps) {
   const selectedGameDef = getGameById(selectedGame) || getDefaultGame();
   const isFreeForAll = !selectedGameDef.isTeamGame;
 
-  // Player limits come from the registry, so the selector, the player list and the start button all agree
+  // Player limits come from the registry, so the selector, the player list and the start button all agree.
+  // The server counts players who are online, so the start gate does too.
+  const onlineCount = Object.values(room.players).filter((p) => p.connected).length;
   const maxPlayersForSelected = selectedGameDef.maxPlayers;
-  const tooMany = playerCount > maxPlayersForSelected;
-  const canStart = playerCount >= selectedGameDef.minPlayers && !tooMany;
+  const tooMany = onlineCount > maxPlayersForSelected;
+  // Team games: every team needs enough players to bluff and to guess
+  const teamsTooSmall = !isFreeForAll && room.teams.some(
+    (t) => t.playerIds.filter((pid) => room.players[pid]?.connected).length < MIN_TEAM_SIZE,
+  );
+  const canStart = onlineCount >= selectedGameDef.minPlayers && !tooMany && !teamsTooSmall;
   const roomUrl = typeof window !== 'undefined' ? `${window.location.origin}/room/${room.code}` : '';
   const hostName = room.players[room.hostId]?.name;
 
@@ -160,7 +167,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
     }
   };
 
-  const playersNeeded = selectedGameDef.minPlayers - playerCount;
+  const playersNeeded = selectedGameDef.minPlayers - onlineCount;
 
   return (
     <div className="flex-1 flex flex-col px-4 pt-4 max-w-lg mx-auto w-full" data-game={selectedGameDef.dataGameAttr}>
@@ -337,7 +344,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-medium text-sm text-(--text-primary)">Players</h3>
             <span className={`text-xs ${tooMany ? 'text-(--danger) font-medium' : 'text-(--text-muted)'}`}>
-              {playerCount}/{maxPlayersForSelected}
+              {onlineCount}/{maxPlayersForSelected}
             </span>
           </div>
           <div className="space-y-0.5">
@@ -422,7 +429,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
               onChange={(turnTimer) => setDiceSettings((s) => ({ ...s, turnTimer }))}
             />
           </SettingRow>
-          <SettingRow label="Wild ⚀" hint="1s count as any face">
+          <SettingRow label="Wild 1s ★" hint="1s count as any face">
             <Toggle
               label="Wild ones"
               checked={diceSettings.wildOnes}
@@ -579,7 +586,9 @@ export default function Lobby({ roomHook }: LobbyProps) {
                 ? `${selectedGameDef.icon} Start ${selectedGameDef.name}`
                 : tooMany
                   ? `Too many players (max ${maxPlayersForSelected})`
-                  : `Need ${playersNeeded} more player${playersNeeded !== 1 ? 's' : ''}`
+                  : playersNeeded > 0
+                    ? `Need ${playersNeeded} more player${playersNeeded !== 1 ? 's' : ''}`
+                    : `Each team needs ${MIN_TEAM_SIZE}+ players`
               }
             </button>
           ) : (

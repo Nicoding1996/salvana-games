@@ -1,204 +1,228 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import type { VoteResult } from '@/types/socket-events';
+import { useEffect, useState } from 'react';
 import type { Room } from '@/types/hub';
+import type { StoryThiefClientState } from '@/types/games/story-thief';
+import { ROUND_POT } from '@/types/games/story-thief';
 import Confetti from '@/components/shared/Confetti';
+import { Avatar, PhaseScreen, listNames, teamShortName, teamStyle } from './ui';
 
-interface Props {
-  voteResult: VoteResult | null;
+// Reveal pacing: drumroll → author → verdict → details + next-round button
+const STAGE_TIMES_MS = [1400, 2300, 3300];
+
+interface ResultPhaseProps {
+  state: StoryThiefClientState;
   room: Room;
+  playerId: string;
   isHost: boolean;
   onNextRound: () => void;
-  onEndGame: () => void;
-  teamScores: Record<string, number>;
-  playerId: string;
-  roundNumber: number;
+  /** The verdict is on screen: the header may show this round's points now */
+  onVerdict: (round: number) => void;
 }
 
-export default function ResultPhase({
-  voteResult, room, isHost,
-  onNextRound, onEndGame,
-  teamScores, playerId, roundNumber,
-}: Props) {
-  const [confirmEnd, setConfirmEnd] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
+const VERDICT_STAGE = 2;
+
+export default function ResultPhase({ state, room, playerId, isHost, onNextRound, onVerdict }: ResultPhaseProps) {
+  const [stage, setStage] = useState(0);
+  const round = state.roundNumber;
 
   useEffect(() => {
-    const timer = setTimeout(() => setShowDetails(true), 3500);
-    return () => clearTimeout(timer);
-  }, []);
+    const timers = STAGE_TIMES_MS.map((ms, i) => setTimeout(() => {
+      setStage(i + 1);
+      if (i + 1 === VERDICT_STAGE) onVerdict(round);
+    }, ms));
+    return () => timers.forEach(clearTimeout);
+  }, [onVerdict, round]);
 
-  if (!voteResult) {
+  const result = state.lastVoteResult;
+  if (!result) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-(--text-muted) animate-soft-pulse">Calculating...</p>
-      </div>
+      <PhaseScreen center>
+        <p className="text-sm text-(--text-secondary) animate-soft-pulse">Counting the votes…</p>
+      </PhaseScreen>
     );
   }
 
-  const author = room.players[voteResult.realAuthorId];
-  const totalVotes = Object.keys(voteResult.votes).length;
-  const correctVotes = Object.values(voteResult.votes).filter(v => v === voteResult.realAuthorId).length;
-  const bluffersWon = totalVotes > 0 && correctVotes <= totalVotes / 2;
+  const bluffTeam = room.teams.find(t => t.id === result.bluffingTeamId);
+  const author = room.players[result.realAuthorId];
+  const members = state.bluffingTeamMembers;
+  const myTeamId = room.players[playerId]?.teamId ?? null;
+  const iWasBluffing = myTeamId === result.bluffingTeamId;
+  const myVote = result.votes[playerId];
+  const myTeamScored = !!myTeamId && (result.teamPointsAwarded[myTeamId] ?? 0) > 0;
+  const winners = room.teams.filter(t => (result.teamPointsAwarded[t.id] ?? 0) > 0);
+  const winnerColor = winners.length === 1 ? winners[0].color : undefined;
+  const hostName = room.players[room.hostId]?.name ?? 'the host';
+  const isAuthor = result.realAuthorId === playerId;
 
-  // Did THIS player guess correctly?
-  const myVote = voteResult.votes[playerId];
-  const iGuessedRight = myVote === voteResult.realAuthorId;
-  const iWasBluffing = room.players[playerId]?.teamId === room.teams.find(t =>
-    t.playerIds.includes(voteResult.realAuthorId)
-  )?.id;
+  let personal: { text: string; good: boolean } | null = null;
+  if (isAuthor) {
+    personal = result.guessersWon
+      ? { text: '😬 They saw right through you', good: false }
+      : { text: '🤫 Nobody believed it was you', good: true };
+  } else if (iWasBluffing) {
+    personal = result.guessersWon
+      ? { text: '😬 They figured it out', good: false }
+      : { text: '🎭 Your team fooled them!', good: true };
+  } else if (myVote) {
+    personal = myVote === result.realAuthorId
+      ? { text: '🎉 You guessed right!', good: true }
+      : { text: '😅 You were fooled', good: false };
+  }
 
-  // Show confetti if my team won this round
-  const myTeamId = room.players[playerId]?.teamId;
-  const myTeamWon = myTeamId ? (voteResult.teamPointsAwarded[myTeamId] || 0) > 0 : false;
+  // Fairness hint for the host: every team has bluffed the same number of times
+  const teamCount = room.teams.length;
+  const fairStop = state.roundNumber > 0 && state.roundNumber % teamCount === 0;
 
-  const sortedTeams = room.teams
-    .map(t => ({ ...t, score: teamScores[t.id] || 0 }))
-    .sort((a, b) => b.score - a.score);
+  const footer = stage >= 3 ? (
+    isHost ? (
+      <div className="space-y-2 animate-fade-in">
+        {fairStop && (
+          <p className="text-center text-xs text-(--game-accent)">
+            ✨ Every team has bluffed {state.roundNumber / teamCount}×, a fair place to stop
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={onNextRound}
+          className="h-14 w-full rounded-2xl bg-(--game-accent) font-heading text-base font-semibold text-(--bg-primary) transition-transform active:scale-[0.97]"
+        >
+          ▶ Next round
+        </button>
+      </div>
+    ) : (
+      <p className="flex min-h-14 items-center justify-center rounded-2xl border border-dashed border-(--border-light) px-4 text-center text-sm text-(--text-secondary) animate-fade-in">
+        Waiting for {hostName} to start the next round
+      </p>
+    )
+  ) : undefined;
 
   return (
-    <div className="flex-1 flex flex-col p-4 overflow-y-auto">
-      {/* Confetti for winners */}
-      {myTeamWon && <Confetti />}
+    <PhaseScreen footer={footer}>
+      {stage >= 2 && myTeamScored && <Confetti />}
 
-      {/* Big reveal */}
-      <div className="text-center pt-6 mb-2">
-        <div className="animate-celebrate">
-          <div className="text-6xl mb-3">{author?.avatar || '❓'}</div>
-        </div>
-        <h2 className="text-2xl font-bold mb-1 animate-fade-in">
-          It was {voteResult.realAuthorName}!
-        </h2>
-        <p className="text-(--text-muted) text-sm animate-fade-in">
-          {correctVotes}/{totalVotes} guessed correctly
-        </p>
-
-        {/* Win/lose badge */}
-        <div className="mt-3 animate-slide-up" style={{ animationDelay: '0.3s', animationFillMode: 'backwards' }}>
-          {iWasBluffing ? (
-            <span className={`inline-block px-4 py-1.5 rounded-full text-sm font-medium ${
-              bluffersWon
-                ? 'bg-(--success-dim) text-(--success) border border-(--success)/20'
-                : 'bg-(--danger-dim) text-(--danger) border border-(--danger)/20'
-            }`}>
-              {bluffersWon ? '🎭 Your team fooled them!' : '😬 They figured it out'}
+      {/* Drumroll, then the author */}
+      <div className="flex min-h-[188px] flex-col items-center justify-center pt-4 text-center">
+        {stage === 0 ? (
+          <>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-(--text-muted)">The real author is…</p>
+            <div className="mt-5 flex justify-center gap-3" aria-hidden="true">
+              {members.map((m, i) => (
+                <span key={m.id} className="st-drumroll" style={{ animationDelay: `${i * 120}ms` }}>
+                  <Avatar emoji={m.avatar} size={52} teamColor={bluffTeam?.color} />
+                </span>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <span className="st-author-reveal">
+              <Avatar emoji={author?.avatar ?? '❓'} size={96} teamColor={bluffTeam?.color} className="st-author-glow" />
             </span>
-          ) : (
-            <span className={`inline-block px-4 py-1.5 rounded-full text-sm font-medium ${
-              iGuessedRight
-                ? 'bg-(--success-dim) text-(--success) border border-(--success)/20'
-                : 'bg-(--danger-dim) text-(--danger) border border-(--danger)/20'
-            }`}>
-              {iGuessedRight ? '🎉 You got it right!' : '😅 You were fooled'}
+            <h2 className="mt-3 text-2xl font-bold text-(--text-primary) animate-fade-in">
+              {isAuthor ? 'It was you!' : `It was ${result.realAuthorName}!`}
+            </h2>
+            <p className="mt-1 text-sm text-(--text-secondary) animate-fade-in">
+              {result.correctVotes} of {result.totalVotes} guessed right
+            </p>
+          </>
+        )}
+      </div>
+
+      {/* Verdict */}
+      {stage >= 2 && (
+        <div className="mt-2 flex flex-col items-center gap-2">
+          <div
+            className="st-verdict w-full rounded-2xl border px-4 py-3 text-center"
+            style={{
+              ...teamStyle(winnerColor),
+              borderColor: winnerColor ? `color-mix(in srgb, ${winnerColor} 45%, transparent)` : 'var(--border-light)',
+              background: winnerColor ? `color-mix(in srgb, ${winnerColor} 12%, var(--bg-card))` : 'var(--bg-card)',
+            }}
+          >
+            <p className="text-base font-bold text-(--text-primary)">
+              {result.guessersWon
+                ? `🔍 ${listNames(winners.map(t => teamShortName(t.name)))} cracked it!`
+                : `🎭 ${bluffTeam ? teamShortName(bluffTeam.name) : 'The bluffers'} fooled them!`}
+            </p>
+            <p className="mt-0.5 text-sm font-semibold st-team-text">+{ROUND_POT} points</p>
+          </div>
+          {personal && (
+            <span
+              className={`rounded-full border px-4 py-1.5 text-sm font-semibold animate-slide-up ${
+                personal.good
+                  ? 'border-(--success)/25 bg-(--success-dim) text-(--success)'
+                  : 'border-(--danger)/25 bg-(--danger-dim) text-(--danger)'
+              }`}
+            >
+              {personal.text}
             </span>
           )}
         </div>
-      </div>
-
-      {/* Share prompt */}
-      <p className="text-center text-(--text-muted) text-xs italic my-3">
-        {voteResult.realAuthorName}, share the full story? 🎤
-      </p>
-
-      {/* Details — delayed */}
-      {showDetails && (
-        <>
-          {/* Vote breakdown — who voted for whom */}
-          <div className="bg-(--bg-card) border border-(--border) rounded-xl p-3.5 mb-2.5 animate-slide-up">
-            <p className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-2">Votes</p>
-            <div className="space-y-1">
-              {Object.entries(voteResult.votes).map(([voterId, suspectId]) => {
-                const voter = room.players[voterId];
-                const suspect = room.players[suspectId];
-                const isCorrect = suspectId === voteResult.realAuthorId;
-                return (
-                  <div key={voterId} className="flex items-center gap-2 text-sm">
-                    <span>{voter?.avatar}</span>
-                    <span className="text-(--text-secondary)">{voter?.name}</span>
-                    <span className="text-(--text-muted)">→</span>
-                    <span className={isCorrect ? 'text-(--success) font-medium' : 'text-(--danger)'}>{suspect?.name}</span>
-                    <span className="text-xs">{isCorrect ? '✓' : '✗'}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Round result */}
-          <div className="bg-(--bg-card) border border-(--border) rounded-xl p-3.5 mb-2.5 animate-slide-up">
-            <p className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-2">Round</p>
-            {room.teams
-              .map(t => ({ ...t, pts: voteResult.teamPointsAwarded[t.id] || 0 }))
-              .sort((a, b) => b.pts - a.pts)
-              .map((team) => (
-                <div key={team.id} className="flex items-center justify-between text-sm py-0.5">
-                  <span style={{ color: team.color }}>{team.name}</span>
-                  <span className="font-semibold" style={{ color: team.pts > 0 ? 'var(--success)' : 'var(--text-muted)' }}>
-                    {team.pts > 0 ? `+${team.pts}` : '—'}
-                  </span>
-                </div>
-              ))}
-          </div>
-
-          {/* Standings */}
-          <div className="bg-(--bg-card) border border-(--border) rounded-xl p-3.5 mb-3 animate-slide-up" style={{ animationDelay: '0.1s' }}>
-            <p className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-2">Standings</p>
-            {sortedTeams.map((team, i) => (
-              <div key={team.id} className="flex items-center justify-between text-sm py-0.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs">{i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}</span>
-                  <span style={{ color: team.color }}>{team.name}</span>
-                </div>
-                <span className="font-bold">{team.score}</span>
-              </div>
-            ))}
-          </div>
-        </>
       )}
 
-      {/* Actions */}
-      <div className="mt-auto pb-4 space-y-2">
-        {isHost && showDetails && (
-          <>
-            {/* Fairness hint */}
-            {roundNumber > 0 && roundNumber % room.teams.length === 0 && (
-              <p className="text-center text-xs text-(--game-accent) mb-2 animate-fade-in">
-                ✨ Each team has bluffed {roundNumber / room.teams.length} time{roundNumber / room.teams.length !== 1 ? 's' : ''} — good stopping point!
-              </p>
-            )}
-            <button
-              onClick={onNextRound}
-              className="w-full py-3.5 bg-(--game-accent) text-(--bg-primary) rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
-            >
-              ▶ Next Round
-            </button>
-            <button
-              onClick={() => {
-                if (confirmEnd) {
-                  onEndGame();
-                } else {
-                  setConfirmEnd(true);
-                  setTimeout(() => setConfirmEnd(false), 3000);
-                }
-              }}
-              className={`w-full py-2 text-xs transition-colors ${
-                confirmEnd ? 'text-(--danger) font-medium' : 'text-(--text-muted)'
-              }`}
-            >
-              {confirmEnd ? 'Tap again to end game' : 'End Game'}
-            </button>
-          </>
-        )}
-        {isHost && !showDetails && (
-          <p className="text-center text-xs text-(--text-muted)">🎤</p>
-        )}
-        {!isHost && (
-          <p className="text-center text-xs text-(--text-muted)">
-            {showDetails ? 'Waiting for host...' : ''}
+      {/* Who voted for whom, then the standings */}
+      {stage >= 3 && (
+        <div className="mt-5 space-y-3 animate-slide-up">
+          <p className="text-center text-xs italic text-(--text-muted)">
+            🎤 {isAuthor ? 'Tell everyone the real story!' : `${result.realAuthorName}, tell everyone the real story!`}
           </p>
-        )}
-      </div>
-    </div>
+
+          <section className="rounded-2xl border border-(--border) bg-(--bg-card) p-3.5" aria-label="Votes">
+            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">Votes</h3>
+            <ul className="space-y-2">
+              {members.map(m => {
+                const voters = Object.entries(result.votes).filter(([, s]) => s === m.id).map(([v]) => v);
+                const real = m.id === result.realAuthorId;
+                return (
+                  <li
+                    key={m.id}
+                    className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2 ${real ? 'bg-(--success-dim) ring-1 ring-(--success)/30' : ''}`}
+                  >
+                    <Avatar emoji={m.avatar} size={32} teamColor={bluffTeam?.color} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-(--text-primary)">
+                        {m.id === playerId ? 'You' : m.name}
+                        {real && <span className="ml-1.5 text-xs font-semibold text-(--success)">✓ wrote it</span>}
+                      </p>
+                      <p className="text-[11px] text-(--text-muted)">
+                        {voters.length === 0 ? 'No votes' : `${voters.length} vote${voters.length === 1 ? '' : 's'}`}
+                      </p>
+                    </div>
+                    <div className="flex -space-x-1.5" aria-label={`Voted by ${voters.map(v => room.players[v]?.name ?? 'someone').join(', ')}`}>
+                      {voters.map(v => (
+                        <span key={v} className="st-voter-dot" title={room.players[v]?.name}>
+                          {room.players[v]?.avatar ?? '❔'}
+                        </span>
+                      ))}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+
+          <section className="rounded-2xl border border-(--border) bg-(--bg-card) p-3.5" aria-label="Standings">
+            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">Standings</h3>
+            <ul className="space-y-1.5">
+              {[...room.teams]
+                .sort((a, b) => (state.teamScores[b.id] ?? 0) - (state.teamScores[a.id] ?? 0))
+                .map(team => {
+                  const gained = result.teamPointsAwarded[team.id] ?? 0;
+                  return (
+                    <li key={team.id} className="flex items-center gap-2 text-sm">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: team.color }} aria-hidden="true" />
+                      <span className="font-semibold" style={{ color: team.color }}>{teamShortName(team.name)}</span>
+                      {team.id === myTeamId && <span className="text-xs text-(--text-muted)">you</span>}
+                      {gained > 0 && <span className="text-xs font-bold text-(--success) st-gain">+{gained}</span>}
+                      <span className="ml-auto font-bold tabular-nums text-(--text-primary)">{state.teamScores[team.id] ?? 0}</span>
+                    </li>
+                  );
+                })}
+            </ul>
+          </section>
+        </div>
+      )}
+    </PhaseScreen>
   );
 }

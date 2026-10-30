@@ -239,6 +239,8 @@ export function getConnectedPlayerCount(room: Room): number {
 export function updateSettings(socketId: string, settings: Partial<RoomSettings>): Room | null {
   const room = getRoomByPlayer(socketId);
   if (!room || room.hostId !== socketId) return null;
+  // Teams and timers are fixed once a game is running
+  if (room.phase !== 'lobby') return null;
 
   if (settings.teamCount && settings.teamCount !== room.settings.teamCount) {
     const newCount = settings.teamCount;

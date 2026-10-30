@@ -1,108 +1,129 @@
 'use client';
 
 import { useState } from 'react';
+import type { Team } from '@/types/hub';
+import type { StoryThiefClientState } from '@/types/games/story-thief';
+import { Avatar, PhaseScreen, StoryCard, SuspectRow, VoteProgress, teamStyle } from './ui';
 
-interface Props {
-  story: string;
-  bluffingTeamMembers: { id: string; name: string; avatar: string }[];
+interface VotingPhaseProps {
+  state: StoryThiefClientState;
+  bluffingTeam: Team | undefined;
   isOnBluffingTeam: boolean;
-  hasVoted: boolean;
+  playerId: string;
+  isHost: boolean;
+  sending: boolean;
   onVote: (suspectId: string) => void;
-  teamColor?: string;
+  onForceReveal: () => void;
 }
 
-export default function VotingPhase({ story, bluffingTeamMembers, isOnBluffingTeam, hasVoted, onVote, teamColor }: Props) {
+function RevealNow({ state, onForceReveal }: { state: StoryThiefClientState; onForceReveal: () => void }) {
+  if (state.votedCount === 0 || state.votedCount >= state.voterCount) return null;
+  return (
+    <button
+      type="button"
+      onClick={onForceReveal}
+      className="mt-4 h-11 rounded-full border border-(--border-light) px-4 text-xs font-semibold text-(--text-secondary) active:scale-95"
+    >
+      Reveal now with {state.votedCount} of {state.voterCount} votes
+    </button>
+  );
+}
+
+export default function VotingPhase({
+  state, bluffingTeam, isOnBluffingTeam, playerId, isHost, sending, onVote, onForceReveal,
+}: VotingPhaseProps) {
   const [selected, setSelected] = useState<string | null>(null);
+  const members = state.bluffingTeamMembers;
 
-  const handleVote = () => {
-    if (selected) {
-      onVote(selected);
-    }
-  };
-
+  // Bluffing team: nothing to do but keep a straight face
   if (isOnBluffingTeam) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
-        <div className="text-4xl mb-4">🎭</div>
-        <h2 className="text-lg font-semibold mb-1">Voting in Progress</h2>
-        <p className="text-(--text-muted) text-sm text-center">
-          They&apos;re deciding who wrote it...
-        </p>
-      </div>
+      <PhaseScreen center>
+        <div className="flex w-full max-w-sm flex-col items-center animate-fade-in">
+          <p className="text-5xl" aria-hidden="true">🎭</p>
+          <h2 className="mt-3 text-lg font-bold text-(--text-primary)">Keep your poker face</h2>
+          <p className="mt-1 text-sm text-(--text-secondary)">The others are voting on who really wrote it.</p>
+          <div className="mt-6 flex w-full justify-center">
+            <VoteProgress voted={state.votedCount} total={state.voterCount} />
+          </div>
+          <SuspectRow className="mt-7" members={members} teamColor={bluffingTeam?.color} myId={playerId} />
+          {isHost && <RevealNow state={state} onForceReveal={onForceReveal} />}
+        </div>
+      </PhaseScreen>
     );
   }
 
-  if (hasVoted) {
+  // Already voted
+  if (state.hasVoted) {
+    const pick = members.find(m => m.id === state.myVote);
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
-        <div className="text-4xl mb-4">✓</div>
-        <h2 className="text-lg font-semibold mb-1">Vote Locked</h2>
-        <p className="text-(--text-muted) text-sm text-center">
-          Waiting for everyone...
-        </p>
-      </div>
+      <PhaseScreen center>
+        <div className="flex w-full max-w-sm flex-col items-center animate-fade-in">
+          {pick && <Avatar emoji={pick.avatar} size={72} teamColor={bluffingTeam?.color} className="st-vote-locked" />}
+          <h2 className="mt-4 text-lg font-bold text-(--text-primary)">🔒 You voted for {pick?.name ?? 'your suspect'}</h2>
+          <p className="mt-1 text-sm text-(--text-secondary)">Waiting for the other votes…</p>
+          <div className="mt-6 flex w-full justify-center">
+            <VoteProgress voted={state.votedCount} total={state.voterCount} />
+          </div>
+          {isHost && <RevealNow state={state} onForceReveal={onForceReveal} />}
+        </div>
+      </PhaseScreen>
     );
   }
+
+  const selectedMember = members.find(m => m.id === selected);
 
   return (
-    <div className="flex-1 flex flex-col p-4 animate-slide-up">
-      {/* Story reminder */}
-      <div
-        className="rounded-xl p-3 mb-4 relative overflow-hidden"
-        style={{
-          background: 'var(--bg-card)',
-          border: `1px solid ${teamColor ? teamColor + '20' : 'var(--border)'}`,
-        }}
-      >
-        <div
-          className="absolute top-0 left-0 right-0 h-[1.5px]"
-          style={{
-            background: teamColor
-              ? `linear-gradient(90deg, transparent, ${teamColor}, transparent)`
-              : 'none',
-            opacity: 0.4,
-          }}
-        />
-        <p className="text-xs text-(--text-muted) mb-1">📜 The story was:</p>
-        <p className="text-sm leading-relaxed">&ldquo;{story}&rdquo;</p>
-      </div>
-
-      <div className="text-center mb-4">
-        <h2 className="text-lg font-semibold mb-0.5">Whose Truth?</h2>
-        <p className="text-(--text-muted) text-sm">Tap who you think wrote it</p>
-      </div>
-
-      <div className="flex-1 space-y-2">
-        {bluffingTeamMembers.map((member) => (
-          <button
-            key={member.id}
-            onClick={() => setSelected(member.id)}
-            className={`w-full flex items-center gap-3.5 p-3.5 rounded-xl transition-all active:scale-[0.98] ${
-              selected === member.id
-                ? 'bg-(--game-accent) text-(--bg-primary)'
-                : 'bg-(--bg-card) border border-(--border) hover:border-(--game-accent)/40'
-            }`}
-            aria-label={`Vote for ${member.name}`}
-            aria-pressed={selected === member.id}
-          >
-            <span className="text-2xl">{member.avatar}</span>
-            <span className="text-base font-medium">{member.name}</span>
-            {selected === member.id && (
-              <span className="ml-auto">✓</span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-4 pb-4">
+    <PhaseScreen
+      footer={(
         <button
-          onClick={handleVote}
-          disabled={!selected}
-          className="w-full py-3.5 bg-(--game-accent) text-(--bg-primary) disabled:opacity-30 rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
+          type="button"
+          onClick={() => selected && onVote(selected)}
+          disabled={!selectedMember || sending}
+          className="h-14 w-full rounded-2xl bg-(--game-accent) font-heading text-base font-semibold text-(--bg-primary) transition-[transform,opacity] active:scale-[0.97] disabled:opacity-35 disabled:active:scale-100"
         >
-          Lock In Vote
+          {sending ? 'Locking in…' : selectedMember ? `Lock in ${selectedMember.name}` : 'Tap a suspect'}
         </button>
+      )}
+    >
+      <StoryCard story={state.currentStory ?? ''} teamColor={bluffingTeam?.color} size="sm" label="The story" />
+
+      <div className="mt-5 text-center">
+        <h2 className="text-lg font-bold text-(--text-primary)">Who really wrote it?</h2>
+        <p className="mt-0.5 text-sm text-(--text-secondary)">Your vote is final.</p>
       </div>
-    </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2.5" role="radiogroup" aria-label="Suspects">
+        {members.map(m => {
+          const active = m.id === selected;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => setSelected(m.id)}
+              className={`st-suspect flex flex-col items-center gap-2 rounded-2xl px-2 py-4 ${active ? 'st-suspect-on' : ''}`}
+              style={teamStyle(bluffingTeam?.color)}
+            >
+              <Avatar emoji={m.avatar} size={56} teamColor={bluffingTeam?.color} dim={!m.connected} />
+              <span className="max-w-full truncate text-sm font-semibold text-(--text-primary)">{m.name}</span>
+              <span className={`text-[11px] font-semibold ${active ? 'text-(--game-accent)' : 'text-(--text-muted)'}`}>
+                {active ? '✓ Your pick' : m.connected ? 'Tap to pick' : 'Offline'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 flex justify-center">
+        <VoteProgress voted={state.votedCount} total={state.voterCount} />
+      </div>
+      {isHost && (
+        <div className="flex justify-center">
+          <RevealNow state={state} onForceReveal={onForceReveal} />
+        </div>
+      )}
+    </PhaseScreen>
   );
 }

@@ -1,384 +1,310 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import type { BattleshipClientState, Coordinate, CellState, ShotEntry } from '@/types/games/battleship';
-import { GRID_LABELS_COL, SHIP_COLORS } from '@/types/games/battleship';
-import GridCell from './GridCell';
+import { useState } from 'react';
+import type {
+  BattleshipClientState,
+  BattleshipTimer,
+  BattleshipTurnRecap,
+  CellState,
+  Coordinate,
+  ShotEntry,
+} from '@/types/games/battleship';
+import { SHIPS, cellName, clampSonar } from '@/types/games/battleship';
+import type { BattleshipShotFx } from '@/lib/games/battleship/useBattleship';
+import TimerBar from '@/components/shared/TimerBar';
+import Board, { fitCellSize, useViewportWidth } from './Board';
+import FleetStatus, { ShipPips } from './FleetStatus';
 
 interface AttackGridProps {
-  gameState: BattleshipClientState;
+  state: BattleshipClientState;
   myId: string;
+  timer: BattleshipTimer | null;
+  lastShot: BattleshipShotFx | null;
+  pending: string | null;
   onFire: (targetId: string, coordinate: Coordinate) => void;
-  onUseSonar: (targetId: string, topLeft: Coordinate) => void;
-  shotResult: ShotEntry | null;
-  sonarResult: { hasShip: boolean; topLeft: { row: number; col: number }; targetId: string } | null;
+  onSonar: (targetId: string, topLeft: Coordinate) => void;
 }
 
-// Haptic feedback helper — light patterns for mobile
-function haptic(type: HapticKind) {
-  if (typeof navigator === 'undefined' || !navigator.vibrate) return;
-  switch (type) {
-    case 'miss': navigator.vibrate(30); break;
-    case 'hit': navigator.vibrate(100); break;
-    case 'sunk': navigator.vibrate([80, 40, 80, 40, 150]); break;
-    case 'incoming': navigator.vibrate([60, 30, 60]); break;
-  }
+interface FeedLine {
+  text: string;
+  tone: 'muted' | 'good' | 'bad' | 'accent';
 }
 
-type HapticKind = 'miss' | 'hit' | 'sunk' | 'incoming';
+const TONE_CLASS: Record<FeedLine['tone'], string> = {
+  muted: 'border-(--border) bg-(--bg-card) text-(--text-secondary)',
+  good: 'border-(--game-accent)/30 bg-(--game-accent-dim) text-(--game-accent)',
+  bad: 'border-(--danger)/30 bg-(--danger-dim) text-(--danger)',
+  accent: 'border-(--success)/30 bg-(--success-dim) text-(--success)',
+};
 
-interface ShotFeedback {
-  shot: ShotEntry | null;
-  cell: string | null;   // "row,col" of the shot, for the impact animation
-  flash: string | null;  // overlay color, or null for no flash
-  shake: boolean;
-  haptic: HapticKind | null;
+function shipNameAt(state: BattleshipClientState, c: Coordinate): string | null {
+  const id = state.myShipMap[c.row]?.[c.col];
+  return SHIPS.find(s => s.id === id)?.name ?? null;
 }
 
-function shotFeedback(shot: ShotEntry | null, myId: string): ShotFeedback {
-  if (!shot) return { shot, cell: null, flash: null, shake: false, haptic: null };
-  const cell = `${shot.coordinate.row},${shot.coordinate.col}`;
-  const isHit = shot.result === 'hit' || shot.result === 'sunk';
+function describeShot(shot: ShotEntry, state: BattleshipClientState, myId: string): FeedLine {
+  const where = cellName(shot.coordinate);
+  const auto = shot.auto ? '⏱️ ' : '';
   if (shot.playerId === myId) {
-    // I fired — flash on hits, haptic by result
-    return { shot, cell, flash: isHit ? 'rgba(249,115,22,0.12)' : null, shake: false, haptic: shot.result };
+    if (shot.result === 'sunk') return { text: `${auto}🔥 You sunk ${shot.targetName}'s ${shot.sunkShipName}!`, tone: 'accent' };
+    if (shot.result === 'hit') return { text: `${auto}💥 Hit at ${where}! Keep going`, tone: 'good' };
+    return { text: `${auto}💧 Miss at ${where}`, tone: 'muted' };
   }
   if (shot.targetId === myId) {
-    // I got shot at — red flash + shake on hits
-    return { shot, cell, flash: isHit ? 'rgba(239,68,68,0.15)' : null, shake: isHit, haptic: 'incoming' };
+    const ship = shipNameAt(state, shot.coordinate) ?? 'ship';
+    if (shot.result === 'sunk') return { text: `${auto}🔥 ${shot.playerName} sunk your ${shot.sunkShipName}!`, tone: 'bad' };
+    if (shot.result === 'hit') return { text: `${auto}💥 ${shot.playerName} hit your ${ship} at ${where}`, tone: 'bad' };
+    return { text: `${auto}💧 ${shot.playerName} missed you at ${where}`, tone: 'muted' };
   }
-  return { shot, cell, flash: null, shake: false, haptic: null };
+  if (shot.result === 'sunk') return { text: `${auto}🔥 ${shot.playerName} sunk ${shot.targetName}'s ${shot.sunkShipName}`, tone: 'good' };
+  if (shot.result === 'hit') return { text: `${auto}💥 ${shot.playerName} hit ${shot.targetName} at ${where}`, tone: 'good' };
+  return { text: `${auto}💧 ${shot.playerName} missed ${shot.targetName} at ${where}`, tone: 'muted' };
 }
 
-export default function AttackGrid({
-  gameState,
-  myId,
-  onFire,
-  onUseSonar,
-  shotResult,
-  sonarResult,
-}: AttackGridProps) {
-  const { players, attackGrids, myGrid, myShipMap, isMyTurn, shotsRemaining, settings, sonarUsed, currentTurnShots } = gameState;
+function describeTurn(turn: BattleshipTurnRecap, myId: string): FeedLine | null {
+  const n = turn.shots.length;
+  if (n === 0) return null;
+  const by = turn.playerId === myId ? 'You' : turn.playerName;
+  const hits = turn.shots.filter(s => s.result !== 'miss').length;
+  const sunk = turn.shots.filter(s => s.result === 'sunk')
+    .map(s => `${s.targetId === myId ? 'your' : `${s.targetName}'s`} ${s.sunkShipName}`);
+  const hitMe = turn.playerId !== myId && turn.shots.some(s => s.targetId === myId && s.result !== 'miss');
+  let text = `Last turn: ${by} fired ${n} · ${hits === 0 ? 'all missed' : `${hits} hit${hits === 1 ? '' : 's'}`}`;
+  if (sunk.length) text += ` · sank ${sunk.join(', ')}`;
+  return { text, tone: hitMe ? 'bad' : hits > 0 ? 'good' : 'muted' };
+}
 
-  const opponents = players.filter(p => p.id !== myId && p.alive);
-  const [chosenTarget, setChosenTarget] = useState<string>('');
-  // Default to the first alive opponent until one is chosen, and again if the chosen one is eliminated
-  const selectedTarget = opponents.some(p => p.id === chosenTarget) ? chosenTarget : (opponents[0]?.id || '');
-
+export default function AttackGrid({ state, myId, timer, lastShot, pending, onFire, onSonar }: AttackGridProps) {
+  const width = useViewportWidth();
+  const [chosenTarget, setChosenTarget] = useState<string | null>(null);
+  const [manualView, setManualView] = useState<{ turn: number; id: string } | null>(null);
   const [sonarMode, setSonarMode] = useState(false);
-  // Reset sonar mode when my turn ends (adjusting state during render, not in an effect)
-  const [prevIsMyTurn, setPrevIsMyTurn] = useState(isMyTurn);
-  if (isMyTurn !== prevIsMyTurn) {
-    setPrevIsMyTurn(isMyTurn);
-    if (!isMyTurn) setSonarMode(false);
+
+  // Sonar aiming ends with the turn (adjusting state while rendering)
+  const [prevTurn, setPrevTurn] = useState(state.turnNumber);
+  if (state.turnNumber !== prevTurn) {
+    setPrevTurn(state.turnNumber);
+    setSonarMode(false);
   }
 
-  // Visual feedback for the latest shot result (impact cell, flash, shake), derived when the shot changes
-  const [fx, setFx] = useState<ShotFeedback>(() => shotFeedback(shotResult, myId));
-  if (shotResult !== fx.shot) {
-    setFx(shotFeedback(shotResult, myId));
+  const me = state.players.find(p => p.id === myId);
+  const aliveOpponents = state.players.filter(p => p.id !== myId && p.alive);
+  const target = aliveOpponents.find(p => p.id === chosenTarget)?.id ?? aliveOpponents[0]?.id ?? null;
+  const active = state.players.find(p => p.id === state.activePlayerId);
+  const watchingOnly = !state.inGame || !me?.alive;
+
+  // What the big board shows: your target on your turn, otherwise wherever the shots are landing
+  let viewId: string | null;
+  if (manualView && manualView.turn === state.turnNumber && state.players.some(p => p.id === manualView.id)) {
+    viewId = manualView.id;
+  } else if (state.isMyTurn) {
+    viewId = target;
+  } else {
+    const last = state.turnShots[state.turnShots.length - 1];
+    viewId = last?.targetId ?? (state.inGame && me?.alive ? myId : aliveOpponents[0]?.id ?? null);
   }
-  const { shot: fxShot, haptic: fxHaptic } = fx;
-  const newShotCell = fx.cell; // "row,col" of latest shot for impact anim
-  const flashColor = fx.flash;
-  const shaking = fx.shake;
+  const viewingMine = viewId === myId && state.inGame;
+  const viewPlayer = state.players.find(p => p.id === viewId);
+  const grid: CellState[][] | undefined = viewingMine ? state.myGrid : viewId ? state.attackGrids[viewId] : undefined;
 
-  // Haptics for the new shot, then clear the transient visuals
-  useEffect(() => {
-    if (!fxShot) return;
-    if (fxHaptic) haptic(fxHaptic);
-    const clearFlash = setTimeout(() => setFx(f => (f.shot === fxShot ? { ...f, flash: null } : f)), 300);
-    const clearImpact = setTimeout(() => setFx(f => (f.shot === fxShot ? { ...f, cell: null, shake: false } : f)), 400);
-    return () => {
-      clearTimeout(clearFlash);
-      clearTimeout(clearImpact);
-    };
-  }, [fxShot, fxHaptic]);
+  const firingHere = state.isMyTurn && !viewingMine && !!viewPlayer?.alive && state.shotsRemaining > 0;
+  const pendingCell = (() => {
+    if (!pending || !viewId || !pending.startsWith(`${viewId}:`)) return null;
+    const [row, col] = pending.slice(viewId.length + 1).split(',').map(Number);
+    return { row, col };
+  })();
+  const impact = lastShot && lastShot.shot.targetId === viewId
+    ? { key: lastShot.key, result: lastShot.shot.result, ...lastShot.shot.coordinate }
+    : null;
+  const scan = state.mySonar && state.mySonar.targetId === viewId ? state.mySonar : null;
+  const hitOnMe = !!lastShot && lastShot.shot.targetId === myId && lastShot.shot.result !== 'miss' && viewingMine;
 
-  const gridSize = settings.gridSize;
-  // Use actual viewport width on client, fallback to 375 for SSR
-  const viewportWidth = typeof window !== 'undefined' ? Math.min(window.innerWidth, 480) : 375;
-  const availableWidth = viewportWidth - 32; // padding
-  const labelWidth = 20;
-  const cellSize = Math.min(Math.floor((availableWidth - labelWidth) / gridSize), 48);
-  const miniCellSize = Math.max(Math.floor(cellSize * 0.38), 8);
-
-  const currentGrid: CellState[][] = attackGrids[selectedTarget] || Array.from({ length: gridSize }, () =>
-    Array.from({ length: gridSize }, () => 'empty' as CellState)
-  );
-
-  // Sonar highlight cells
-  const sonarHighlightCells = new Set<string>();
-  if (sonarResult && sonarResult.targetId === selectedTarget) {
-    for (let r = sonarResult.topLeft.row; r < sonarResult.topLeft.row + 2 && r < gridSize; r++) {
-      for (let c = sonarResult.topLeft.col; c < sonarResult.topLeft.col + 2 && c < gridSize; c++) {
-        sonarHighlightCells.add(`${r},${c}`);
-      }
+  const handleSelect = (id: string) => {
+    if (state.isMyTurn && id !== myId && aliveOpponents.some(p => p.id === id)) {
+      setChosenTarget(id);
+      setManualView(null);
+    } else {
+      setManualView({ turn: state.turnNumber, id });
     }
-  }
+  };
 
-  const handleCellTap = (row: number, col: number) => {
-    if (!isMyTurn || shotsRemaining <= 0) return;
-    if (!selectedTarget) return;
-
+  const handleTap = (row: number, col: number) => {
+    if (!viewId || !firingHere) return;
     if (sonarMode) {
-      onUseSonar(selectedTarget, { row, col });
+      onSonar(viewId, clampSonar({ row, col }, state.gridSize));
       setSonarMode(false);
       return;
     }
-
-    // Check if already shot
-    if (currentGrid[row][col] !== 'empty') return;
-
-    onFire(selectedTarget, { row, col });
+    onFire(viewId, { row, col });
   };
 
-  const canFire = isMyTurn && shotsRemaining > 0;
-  const allShotsFired = isMyTurn && shotsRemaining === 0;
+  // ---- Banner ----
+  const myTimer = timer && timer.playerId === myId ? timer : null;
+  const activeTimer = timer && timer.playerId && timer.playerId === state.activePlayerId ? timer : null;
+  let banner: { text: string; tone: string };
+  if (state.isMyTurn) {
+    banner = state.shotsRemaining > 0
+      ? { text: `🎯 Your turn · ${state.shotsRemaining} shot${state.shotsRemaining === 1 ? '' : 's'} left`, tone: 'var(--game-accent)' }
+      : { text: '⏳ Shots away…', tone: 'var(--text-secondary)' };
+  } else if (active) {
+    const atMe = state.turnShots.some(s => s.targetId === myId);
+    banner = { text: `${active.avatar} ${active.name} is firing${atMe ? ' at you!' : '…'}`, tone: atMe ? 'var(--danger)' : 'var(--text-secondary)' };
+  } else {
+    banner = { text: 'Battle stations…', tone: 'var(--text-secondary)' };
+  }
 
-  // Incoming hits on MY grid this round (from other players' turns)
-  const incomingHits = currentTurnShots.filter(s => s.targetId === myId);
+  // ---- Feed ----
+  const lastThisTurn = state.turnShots[state.turnShots.length - 1];
+  const feed: FeedLine | null = lastThisTurn
+    ? describeShot(lastThisTurn, state, myId)
+    : state.previousTurn ? describeTurn(state.previousTurn, myId) : null;
+
+  const mainCell = fitCellSize(width - 24, state.gridSize, true);
+  const miniCell = fitCellSize(Math.round((width - 24) * 0.4), state.gridSize, false);
+  const showSonar = state.settings.sonarPing && !state.sonarUsed && state.isMyTurn && state.shotsRemaining > 0;
 
   return (
-    <div className={`flex flex-col h-full relative ${shaking ? 'animate-screen-shake' : ''}`}>
-      {/* Flash overlay */}
-      {flashColor && (
+    <div className="flex flex-col gap-2 bs-safe-bottom">
+      <FleetStatus
+        players={state.players}
+        myId={myId}
+        activePlayerId={state.activePlayerId}
+        selectedId={viewId}
+        onSelect={handleSelect}
+      />
+
+      {/* Whose turn */}
+      <div className="px-4">
         <div
-          className="absolute inset-0 z-20 pointer-events-none rounded-xl animate-flash"
-          style={{ backgroundColor: flashColor }}
-        />
-      )}
-      {/* Target selector */}
-      {opponents.length > 1 && (
-        <div className="flex gap-1.5 px-1 mb-2 overflow-x-auto pb-1">
-          {opponents.map(p => (
-            <button
-              key={p.id}
-              onClick={() => setChosenTarget(p.id)}
-              className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs transition-all active:scale-95 ${
-                selectedTarget === p.id
-                  ? 'bg-(--game-accent)/15 border-2 border-(--game-accent)/60 text-(--text-primary)'
-                  : 'bg-(--bg-card) border border-(--border) text-(--text-secondary)'
-              }`}
-            >
-              <span className="text-base">{p.avatar}</span>
-              <span className="font-medium">{p.name}</span>
-              <div className="flex gap-0.5 ml-1">
-                {Array.from({ length: p.totalShips }, (_, i) => (
-                  <span
-                    key={i}
-                    className={`inline-block w-1.5 h-2.5 rounded-sm transition-all ${
-                      i < p.shipsRemaining ? 'bg-(--danger)' : 'bg-(--text-muted)/20'
-                    }`}
-                  />
-                ))}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Single opponent header */}
-      {opponents.length === 1 && (
-        <div className="px-1 mb-2 flex items-center gap-2">
-          <span className="text-base">{opponents[0].avatar}</span>
-          <span className="text-sm font-medium text-(--text-primary)">{opponents[0].name}</span>
-          <div className="flex gap-0.5 ml-1">
-            {Array.from({ length: opponents[0].totalShips }, (_, i) => (
-              <span
-                key={i}
-                className={`inline-block w-1.5 h-2.5 rounded-sm ${
-                  i < opponents[0].shipsRemaining ? 'bg-(--danger)' : 'bg-(--text-muted)/20'
-                }`}
-              />
-            ))}
+          key={`${state.turnNumber}-${state.isMyTurn}`}
+          className="bs-banner-in rounded-xl border px-3 py-2"
+          style={{
+            borderColor: `color-mix(in srgb, ${banner.tone} 35%, transparent)`,
+            background: `color-mix(in srgb, ${banner.tone} 8%, transparent)`,
+          }}
+          aria-live="polite"
+        >
+          <div className="flex items-center gap-2">
+            <p className="min-w-0 flex-1 truncate text-sm font-semibold" style={{ color: banner.tone }}>{banner.text}</p>
+            {state.isMyTurn && state.shotsThisTurn > 1 && (
+              <ShipPips remaining={state.shotsRemaining} total={state.shotsThisTurn} />
+            )}
+            {activeTimer && (
+              <span className={`shrink-0 font-mono text-sm font-bold tabular-nums ${activeTimer.secondsLeft <= 5 ? 'text-(--danger) animate-timer-urgent' : 'text-(--text-secondary)'}`}>
+                {activeTimer.secondsLeft}s
+              </span>
+            )}
           </div>
-        </div>
-      )}
-
-      {/* Fixed-height status bar — single slot, no layout shift */}
-      <div className="mx-1 mb-2 h-9 flex items-center justify-center relative overflow-hidden">
-        {(() => {
-          // Priority: incoming fire > sonar > shot result > idle
-          let text = '';
-          let colorClass = 'text-(--text-muted)';
-          let bgClass = 'bg-transparent';
-
-          if (incomingHits.length > 0 && !isMyTurn) {
-            const lastHit = incomingHits[incomingHits.length - 1];
-            const wasHit = incomingHits.some(h => h.result === 'hit' || h.result === 'sunk');
-            text = `⚠️ ${lastHit.playerName} fired at your fleet!${wasHit ? ' — They hit something!' : ''}`;
-            colorClass = 'text-(--danger)';
-            bgClass = 'bg-(--danger)/10 border border-(--danger)/20';
-          } else if (sonarResult && sonarResult.targetId === selectedTarget) {
-            text = sonarResult.hasShip ? '📡 Ship detected in scan area!' : '📡 All clear — no ships here';
-            colorClass = sonarResult.hasShip ? 'text-(--success)' : 'text-(--text-muted)';
-            bgClass = sonarResult.hasShip ? 'bg-(--success)/10 border border-(--success)/20' : 'bg-(--bg-card) border border-(--border)';
-          } else if (shotResult) {
-            if (shotResult.playerId === myId) {
-              if (shotResult.result === 'miss') text = '💧 Miss!';
-              else if (shotResult.result === 'hit') text = '💥 Hit!';
-              else if (shotResult.result === 'sunk') text = `🔥 You sunk ${shotResult.targetName}'s ${shotResult.sunkShipName}!`;
-            } else if (shotResult.targetId === myId) {
-              if (shotResult.result === 'miss') text = `💧 ${shotResult.playerName} missed you`;
-              else if (shotResult.result === 'hit') text = `💥 ${shotResult.playerName} hit your ship!`;
-              else if (shotResult.result === 'sunk') text = `🔥 ${shotResult.playerName} sunk your ${shotResult.sunkShipName}!`;
-            } else {
-              if (shotResult.result === 'miss') text = `${shotResult.playerName} → ${shotResult.targetName}: miss`;
-              else if (shotResult.result === 'hit') text = `${shotResult.playerName} hit ${shotResult.targetName}!`;
-              else if (shotResult.result === 'sunk') text = `🔥 ${shotResult.playerName} sunk ${shotResult.targetName}'s ${shotResult.sunkShipName}!`;
-            }
-            colorClass = shotResult.result === 'miss'
-              ? 'text-(--text-muted)'
-              : shotResult.result === 'sunk' ? 'text-(--danger)' : 'text-(--game-accent)';
-            bgClass = shotResult.result === 'miss'
-              ? 'bg-(--bg-card) border border-(--border)'
-              : shotResult.result === 'sunk' ? 'bg-(--danger)/10 border border-(--danger)/20' : 'bg-(--game-accent)/10 border border-(--game-accent)/20';
-          }
-
-          if (!text) return null;
-
-          return (
-            <div
-              key={text}
-              className={`w-full px-3 py-1.5 rounded-xl text-center text-xs font-medium truncate animate-fade-in ${colorClass} ${bgClass}`}
-            >
-              {text}
+          {activeTimer && activeTimer.total > 0 && (
+            <div className="mt-1.5">
+              <TimerBar seconds={activeTimer.secondsLeft} total={activeTimer.total} />
             </div>
-          );
-        })()}
+          )}
+          {!state.isMyTurn && active && !active.connected && (
+            <p className="mt-1 text-[11px] text-(--text-muted)">{active.name} is away · their shots fire automatically</p>
+          )}
+          {myTimer && myTimer.secondsLeft <= 5 && state.shotsRemaining > 0 && (
+            <p className="mt-1 text-[11px] text-(--danger)">Out of time soon: leftover shots fire at random</p>
+          )}
+        </div>
       </div>
 
-      {/* Main Attack Grid */}
-      <div className="flex flex-col items-center">
-        {/* Column labels */}
-        <div className="flex" style={{ marginLeft: labelWidth }}>
-          {Array.from({ length: gridSize }, (_, i) => (
-            <div
-              key={i}
-              className="text-[9px] text-(--text-muted) text-center font-mono"
-              style={{ width: cellSize }}
-            >
-              {GRID_LABELS_COL[i]}
-            </div>
-          ))}
-        </div>
-
-        {/* Grid rows */}
-        {currentGrid.map((row, rowIdx) => (
-          <div key={rowIdx} className="flex items-center">
-            <div
-              className="text-[9px] text-(--text-muted) text-center font-mono"
-              style={{ width: labelWidth }}
-            >
-              {rowIdx + 1}
-            </div>
-            {row.map((cell, colIdx) => {
-              const isSonarHighlight = sonarHighlightCells.has(`${rowIdx},${colIdx}`);
-              const cellKey = `${rowIdx},${colIdx}`;
-              return (
-                <GridCell
-                  key={colIdx}
-                  state={cell}
-                  row={rowIdx}
-                  col={colIdx}
-                  onTap={canFire ? handleCellTap : undefined}
-                  disabled={!canFire || cell !== 'empty'}
-                  highlight={isSonarHighlight}
-                  sonarMode={sonarMode}
-                  size={cellSize}
-                  isNew={newShotCell === cellKey}
-                />
-              );
-            })}
+      {/* Board */}
+      <div className="flex flex-col items-center gap-1.5 px-3">
+        <p className="w-full px-1 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-(--text-muted)">
+          {viewingMine
+            ? '🛡️ Your fleet'
+            : viewPlayer
+              ? `${firingHere ? (sonarMode ? '📡 Scan' : '🎯 Fire at') : '🌊'} ${viewPlayer.name}'s waters`
+              : 'Waters'}
+          {firingHere && !sonarMode && <span className="normal-case tracking-normal text-(--text-secondary)"> · tap a square</span>}
+          {sonarMode && <span className="normal-case tracking-normal text-(--success)"> · tap the top-left of a 2×2 area</span>}
+        </p>
+        {grid ? (
+          <div key={hitOnMe ? `shake-${lastShot?.key}` : 'board'} className={`relative ${hitOnMe ? 'animate-screen-shake' : ''}`}>
+            <Board
+              grid={grid}
+              shipMap={viewingMine ? state.myShipMap : undefined}
+              cellSize={mainCell}
+              labels
+              live={firingHere && !sonarMode}
+              sonarMode={sonarMode}
+              ariaLabel={viewingMine ? 'Your fleet' : `${viewPlayer?.name ?? 'Opponent'}'s waters`}
+              onTap={firingHere ? handleTap : undefined}
+              canTap={(r, c) => !pending && (sonarMode || grid[r][c] === 'empty')}
+              pending={pendingCell}
+              impact={impact}
+              scan={scan}
+            />
+            {hitOnMe && (
+              <span className="pointer-events-none absolute inset-0 rounded-[14px] bg-(--danger)/25 animate-flash" aria-hidden="true" />
+            )}
           </div>
-        ))}
+        ) : (
+          <p className="py-10 text-sm text-(--text-muted)">Nothing to show</p>
+        )}
       </div>
 
-      {/* Mini-map: My Fleet (always visible below attack grid) */}
-      <div className="mt-3 px-1">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-[10px] uppercase tracking-wider text-(--text-muted) font-medium">Your Fleet</span>
-          <div className="flex-1 h-px bg-(--border)" />
-        </div>
-        <div className="flex flex-col items-center bg-[#080b11] rounded-lg p-2 border border-[#1e293b]/60">
-          {myGrid.map((row, rowIdx) => (
-            <div key={rowIdx} className="flex">
-              {row.map((cell, colIdx) => {
-                let miniColor = '#0f1219'; // empty — very dark
-                let shipId: string | null = null;
-                if (Array.isArray(myShipMap) && myShipMap.length > rowIdx && Array.isArray(myShipMap[rowIdx]) && myShipMap[rowIdx].length > colIdx) {
-                  shipId = myShipMap[rowIdx][colIdx] || null;
-                }
-
-                if (cell === 'ship' || (cell === 'hit' && shipId)) {
-                  if (cell === 'hit') {
-                    miniColor = '#f97316'; // orange fire on ship
-                  } else if (shipId && SHIP_COLORS[shipId]) {
-                    miniColor = SHIP_COLORS[shipId].mini;
-                  } else {
-                    miniColor = '#22d3ee'; // fallback cyan
-                  }
-                } else if (cell === 'hit') {
-                  miniColor = '#f97316';
-                } else if (cell === 'miss') {
-                  miniColor = '#1e293b';
-                } else if (cell === 'sunk') {
-                  miniColor = '#dc2626';
-                }
-
-                return (
-                  <div
-                    key={colIdx}
-                    className="rounded-[2px]"
-                    style={{
-                      width: miniCellSize,
-                      height: miniCellSize,
-                      margin: 0.5,
-                      backgroundColor: miniColor,
-                    }}
-                  />
-                );
-              })}
-            </div>
-          ))}
-        </div>
+      {/* What just happened */}
+      <div className="min-h-9 px-4" role="status" aria-live="polite">
+        {feed && (
+          <p key={feed.text} className={`truncate rounded-xl border px-3 py-1.5 text-center text-xs font-semibold animate-fade-in ${TONE_CLASS[feed.tone]}`}>
+            {feed.text}
+          </p>
+        )}
       </div>
 
-      {/* Action buttons */}
-      {isMyTurn && (
-        <div className="px-1 pt-3 pb-2 space-y-2">
-          {/* Sonar button */}
-          {settings.sonarPing && !sonarUsed && !allShotsFired && (
+      {/* Your fleet (small) + tools */}
+      <div className="flex items-start gap-3 px-4">
+        {state.inGame && !viewingMine && (
+          <button
+            type="button"
+            onClick={() => setManualView({ turn: state.turnNumber, id: myId })}
+            className="shrink-0 rounded-xl text-left active:scale-[0.98]"
+            aria-label="Show your fleet"
+          >
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-(--text-muted)">Your fleet</p>
+            <Board
+              grid={state.myGrid}
+              shipMap={state.myShipMap}
+              cellSize={miniCell}
+              ariaLabel="Your fleet (small)"
+              impact={lastShot && lastShot.shot.targetId === myId ? { key: lastShot.key, result: lastShot.shot.result, ...lastShot.shot.coordinate } : null}
+            />
+          </button>
+        )}
+        <div className="flex min-w-0 flex-1 flex-col gap-2 pt-4">
+          {showSonar && (
             <button
-              onClick={() => setSonarMode(!sonarMode)}
-              className={`w-full py-2.5 rounded-xl text-xs font-medium transition-all active:scale-[0.97] ${
+              type="button"
+              onClick={() => setSonarMode(m => !m)}
+              className={`min-h-11 rounded-xl border px-3 text-xs font-semibold transition-colors ${
                 sonarMode
-                  ? 'bg-(--success)/20 border-2 border-(--success)/50 text-(--success)'
-                  : 'bg-(--bg-card) border border-(--border) text-(--text-secondary)'
+                  ? 'border-(--success)/50 bg-(--success-dim) text-(--success)'
+                  : 'border-(--border-light) bg-(--bg-card) text-(--text-secondary)'
               }`}
             >
-              {sonarMode ? '📡 Tap a cell to scan 2×2 area — tap again to cancel' : '📡 Use Sonar Ping (1 use)'}
+              {sonarMode ? '📡 Cancel sonar' : '📡 Sonar ping (once)'}
             </button>
           )}
-
-          {/* Auto-advancing indicator after all shots fired */}
-          {allShotsFired && (
-            <div className="text-center py-3 animate-fade-in">
-              <p className="text-sm text-(--text-secondary)">⏳ Advancing...</p>
-            </div>
+          {state.mySonar && (
+            <p className="text-[11px] leading-snug text-(--text-secondary)">
+              📡 Your scan of {state.players.find(p => p.id === state.mySonar?.targetId)?.name ?? 'a fleet'}:{' '}
+              <span className={state.mySonar.hasShip ? 'font-semibold text-(--success)' : 'text-(--text-muted)'}>
+                {state.mySonar.hasShip ? 'ship in that area!' : 'empty'}
+              </span>
+            </p>
           )}
-
-          {/* Shots counter */}
-          {!allShotsFired && !sonarMode && (
-            <div className="text-center">
-              <p className="text-xs text-(--text-muted)">
-                🎯 {shotsRemaining} shot{shotsRemaining !== 1 ? 's' : ''} remaining
-              </p>
-            </div>
+          {state.isMyTurn && !watchingOnly && state.settings.shotMode === 'salvo' && (
+            <p className="text-[11px] leading-snug text-(--text-muted)">Salvo: one shot per ship you still have afloat.</p>
+          )}
+          {watchingOnly && (
+            <p className="text-xs text-(--text-secondary)">
+              {state.inGame ? '☠️ Your fleet was sunk. Watching the battle.' : '👀 Watching this game.'}
+            </p>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

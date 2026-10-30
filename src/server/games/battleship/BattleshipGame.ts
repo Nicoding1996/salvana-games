@@ -1,597 +1,48 @@
 import type { Room } from '@/types/hub';
 import type {
-  BattleshipServerState,
-  BattleshipServerPlayerData,
   BattleshipClientState,
   BattleshipPlayerInfo,
+  BattleshipServerPlayerData,
+  BattleshipServerState,
   BattleshipSettings,
-  ShipPlacement,
-  Coordinate,
-  ShotResult,
-  ShotEntry,
+  BattleshipTimer,
   CellState,
+  Coordinate,
+  ShipPlacement,
+  ShotEntry,
+  ShotResult,
 } from '@/types/games/battleship';
-import { DEFAULT_BATTLESHIP_SETTINGS, SHIPS } from '@/types/games/battleship';
+import {
+  BATTLESHIP_MAX_PLAYERS,
+  DEFAULT_BATTLESHIP_SETTINGS,
+  SHIPS,
+  clampSonar,
+  fleetError,
+  randomFleet,
+  shipCells,
+} from '@/types/games/battleship';
 
 // ---- In-memory game store ----
 const games = new Map<string, BattleshipServerState>();
-const activeTimers = new Map<string, ReturnType<typeof setInterval>>();
-
-// ---- Public API ----
-
-export function createGame(room: Room, settings?: Partial<BattleshipSettings>): BattleshipServerState {
-  const mergedSettings: BattleshipSettings = { ...DEFAULT_BATTLESHIP_SETTINGS, ...settings };
-
-  // Build turn order from connected players (shuffled)
-  const playerIds = Object.keys(room.players).filter(id => room.players[id].connected);
-  shuffleArray(playerIds);
-
-  const playerData: Record<string, BattleshipServerPlayerData> = {};
-  for (const id of playerIds) {
-    playerData[id] = {
-      ships: [],
-      placements: [],
-      incomingShots: [],
-      alive: true,
-      ready: false,
-      sonarUsed: false,
-    };
-  }
-
-  const state: BattleshipServerState = {
-    phase: 'placement',
-    playerData,
-    turnOrder: [...playerIds],
-    currentPlayerIndex: 0,
-    roundNumber: 1,
-    settings: mergedSettings,
-    turnTimerEnd: null,
-    lastTurnShots: [],
-    eliminationOrder: [],
-    placementTimerEnd: mergedSettings.placementTimer > 0
-      ? Date.now() + mergedSettings.placementTimer * 1000
-      : null,
-  };
-
-  games.set(room.code, state);
-  console.log(`[Battleship] Game created in ${room.code} with ${playerIds.length} players`);
-  return state;
-}
-
-export function placeShips(
-  roomCode: string,
-  playerId: string,
-  placements: ShipPlacement[]
-): { success: boolean; error?: string } {
-  const state = games.get(roomCode);
-  if (!state || state.phase !== 'placement') return { success: false, error: 'Not in placement phase' };
-
-  const pd = state.playerData[playerId];
-  if (!pd) return { success: false, error: 'Player not in game' };
-  if (pd.ready) return { success: false, error: 'Already placed ships' };
-
-  const gridSize = state.settings.gridSize;
-
-  // Validate placements
-  if (placements.length !== SHIPS.length) {
-    return { success: false, error: `Must place exactly ${SHIPS.length} ships` };
-  }
-
-  const occupiedCells = new Set<string>();
-
-  for (const placement of placements) {
-    const shipDef = SHIPS.find(s => s.id === placement.shipId);
-    if (!shipDef) return { success: false, error: `Unknown ship: ${placement.shipId}` };
-
-    const cells = getShipCells(placement, shipDef.size);
-
-    // Check bounds
-    for (const cell of cells) {
-      if (cell.row < 0 || cell.row >= gridSize || cell.col < 0 || cell.col >= gridSize) {
-        return { success: false, error: `Ship ${shipDef.name} out of bounds` };
-      }
-      const key = `${cell.row},${cell.col}`;
-      if (occupiedCells.has(key)) {
-        return { success: false, error: `Ships overlap at ${key}` };
-      }
-      occupiedCells.add(key);
-    }
-  }
-
-  // All valid — store
-  pd.placements = placements;
-  pd.ships = placements.map(p => {
-    const shipDef = SHIPS.find(s => s.id === p.shipId)!;
-    return {
-      shipId: p.shipId,
-      cells: getShipCells(p, shipDef.size),
-      hits: [],
-      sunk: false,
-    };
-  });
-  pd.ready = true;
-
-  return { success: true };
-}
-
-export function autoPlaceShips(roomCode: string, playerId: string): { success: boolean } {
-  const state = games.get(roomCode);
-  if (!state || state.phase !== 'placement') return { success: false };
-
-  const pd = state.playerData[playerId];
-  if (!pd || pd.ready) return { success: false };
-
-  const gridSize = state.settings.gridSize;
-  const placements = generateRandomPlacements(gridSize);
-
-  if (!placements) return { success: false };
-
-  pd.placements = placements;
-  pd.ships = placements.map(p => {
-    const shipDef = SHIPS.find(s => s.id === p.shipId)!;
-    return {
-      shipId: p.shipId,
-      cells: getShipCells(p, shipDef.size),
-      hits: [],
-      sunk: false,
-    };
-  });
-  pd.ready = true;
-
-  return { success: true };
-}
-
-export function allPlayersReady(roomCode: string, room: Room): boolean {
-  const state = games.get(roomCode);
-  if (!state) return false;
-
-  const connectedPlayers = state.turnOrder.filter(id => room.players[id]?.connected);
-  return connectedPlayers.every(id => state.playerData[id]?.ready);
-}
-
-export function startBattle(roomCode: string): boolean {
-  const state = games.get(roomCode);
-  if (!state || state.phase !== 'placement') return false;
-
-  state.phase = 'battle';
-  state.placementTimerEnd = null;
-  // Filter turn order to only ready players
-  state.turnOrder = state.turnOrder.filter(id => state.playerData[id]?.ready);
-  state.currentPlayerIndex = 0;
-
-  return true;
-}
-
-export function fireShot(
-  roomCode: string,
-  playerId: string,
-  targetId: string,
-  coordinate: Coordinate,
-  room: Room
-): { success: boolean; result?: ShotResult; sunkShipName?: string; error?: string } {
-  const state = games.get(roomCode);
-  if (!state || state.phase !== 'battle') return { success: false, error: 'Not in battle phase' };
-
-  // Verify it's this player's turn
-  if (state.turnOrder[state.currentPlayerIndex] !== playerId) {
-    return { success: false, error: 'Not your turn' };
-  }
-
-  // Verify player is alive
-  if (!state.playerData[playerId]?.alive) {
-    return { success: false, error: 'You are eliminated' };
-  }
-
-  // Verify target is alive and different from shooter
-  if (targetId === playerId) return { success: false, error: 'Cannot shoot yourself' };
-  if (!state.playerData[targetId]?.alive) return { success: false, error: 'Target is eliminated' };
-
-  // Verify coordinate is valid
-  const gridSize = state.settings.gridSize;
-  if (coordinate.row < 0 || coordinate.row >= gridSize || coordinate.col < 0 || coordinate.col >= gridSize) {
-    return { success: false, error: 'Invalid coordinate' };
-  }
-
-  // Check if already shot at this coordinate on this target
-  const targetData = state.playerData[targetId];
-  const alreadyShot = targetData.incomingShots.some(
-    s => s.coordinate.row === coordinate.row && s.coordinate.col === coordinate.col
-  );
-  if (alreadyShot) return { success: false, error: 'Already fired at this coordinate' };
-
-  // Determine result
-  let result: ShotResult = 'miss';
-  let sunkShipName: string | undefined;
-
-  for (const ship of targetData.ships) {
-    if (ship.sunk) continue;
-    const hitCell = ship.cells.find(c => c.row === coordinate.row && c.col === coordinate.col);
-    if (hitCell) {
-      ship.hits.push(coordinate);
-      if (ship.hits.length >= ship.cells.length) {
-        ship.sunk = true;
-        result = 'sunk';
-        sunkShipName = SHIPS.find(s => s.id === ship.shipId)?.name;
-      } else {
-        result = 'hit';
-      }
-      break;
-    }
-  }
-
-  // Record the shot
-  targetData.incomingShots.push({ coordinate, result });
-
-  const shotEntry: ShotEntry = {
-    playerId,
-    playerName: room.players[playerId]?.name || 'Unknown',
-    targetId,
-    targetName: room.players[targetId]?.name || 'Unknown',
-    coordinate,
-    result,
-    sunkShipName,
-  };
-  state.lastTurnShots.push(shotEntry);
-
-  // Check if target is eliminated (all ships sunk)
-  const allSunk = targetData.ships.every(s => s.sunk);
-  if (allSunk) {
-    targetData.alive = false;
-    state.eliminationOrder.push(targetId);
-  }
-
-  return { success: true, result, sunkShipName };
-}
-
-export function getShotsForTurn(roomCode: string, playerId: string): number {
-  const state = games.get(roomCode);
-  if (!state) return 0;
-
-  const pd = state.playerData[playerId];
-  if (!pd || !pd.alive) return 0;
-
-  if (state.settings.shotMode === 'classic') return 1;
-
-  // Salvo: shots = number of surviving ships
-  return pd.ships.filter(s => !s.sunk).length;
-}
-
-export function getShotsRemainingForTurn(roomCode: string, playerId: string): number {
-  const state = games.get(roomCode);
-  if (!state) return 0;
-
-  const totalShots = getShotsForTurn(roomCode, playerId);
-  const shotsFired = state.lastTurnShots.filter(s => s.playerId === playerId).length;
-  return Math.max(0, totalShots - shotsFired);
-}
-
-export function endTurn(roomCode: string, room: Room): { gameOver: boolean; winnerId?: string } {
-  const state = games.get(roomCode);
-  if (!state || state.phase !== 'battle') return { gameOver: false };
-
-  // Check game over
-  const alivePlayers = state.turnOrder.filter(id => state.playerData[id]?.alive);
-  if (alivePlayers.length <= 1) {
-    state.phase = 'finished';
-    return { gameOver: true, winnerId: alivePlayers[0] };
-  }
-
-  // Advance to next alive player
-  do {
-    state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.turnOrder.length;
-  } while (!state.playerData[state.turnOrder[state.currentPlayerIndex]]?.alive);
-
-  state.lastTurnShots = [];
-  state.roundNumber++;
-
-  return { gameOver: false };
-}
-
-export function useSonar(
-  roomCode: string,
-  playerId: string,
-  targetId: string,
-  topLeft: Coordinate
-): { success: boolean; hasShip?: boolean; error?: string } {
-  const state = games.get(roomCode);
-  if (!state || state.phase !== 'battle') return { success: false, error: 'Not in battle phase' };
-  if (!state.settings.sonarPing) return { success: false, error: 'Sonar not enabled' };
-
-  if (state.turnOrder[state.currentPlayerIndex] !== playerId) {
-    return { success: false, error: 'Not your turn' };
-  }
-
-  const pd = state.playerData[playerId];
-  if (!pd || pd.sonarUsed) return { success: false, error: 'Sonar already used' };
-
-  const targetData = state.playerData[targetId];
-  if (!targetData || !targetData.alive) return { success: false, error: 'Invalid target' };
-
-  pd.sonarUsed = true;
-
-  // Check 2x2 area for any ship cell
-  const gridSize = state.settings.gridSize;
-  let hasShip = false;
-  for (let r = topLeft.row; r < topLeft.row + 2 && r < gridSize; r++) {
-    for (let c = topLeft.col; c < topLeft.col + 2 && c < gridSize; c++) {
-      for (const ship of targetData.ships) {
-        if (ship.sunk) continue;
-        if (ship.cells.some(cell => cell.row === r && cell.col === c)) {
-          hasShip = true;
-          break;
-        }
-      }
-      if (hasShip) break;
-    }
-    if (hasShip) break;
-  }
-
-  return { success: true, hasShip };
-}
-
-export function getClientState(
-  roomCode: string,
-  playerId: string,
-  room: Room
-): BattleshipClientState | null {
-  const state = games.get(roomCode);
-  if (!state) return null;
-
-  const gridSize = state.settings.gridSize;
-
-  // Build player info
-  const players: BattleshipPlayerInfo[] = state.turnOrder.map(id => {
-    const pd = state.playerData[id];
-    const rp = room.players[id];
-    return {
-      id,
-      name: rp?.name || 'Unknown',
-      avatar: rp?.avatar || '⚓',
-      alive: pd?.alive || false,
-      connected: rp?.connected || false,
-      shipsRemaining: pd?.ships.filter(s => !s.sunk).length || 0,
-      totalShips: SHIPS.length,
-      ready: pd?.ready || false,
-    };
-  });
-
-  // Build my grid (shows my ships + incoming hits)
-  const myData = state.playerData[playerId];
-  const myGrid: CellState[][] = Array.from({ length: gridSize }, () =>
-    Array.from({ length: gridSize }, () => 'empty' as CellState)
-  );
-  const myShipMap: (string | null)[][] = Array.from({ length: gridSize }, () =>
-    Array.from({ length: gridSize }, () => null)
-  );
-
-  if (myData) {
-    // Place my ships
-    for (const ship of myData.ships) {
-      for (const cell of ship.cells) {
-        myShipMap[cell.row][cell.col] = ship.shipId;
-        if (ship.sunk) {
-          myGrid[cell.row][cell.col] = 'sunk';
-        } else if (ship.hits.some(h => h.row === cell.row && h.col === cell.col)) {
-          myGrid[cell.row][cell.col] = 'hit';
-        } else {
-          myGrid[cell.row][cell.col] = 'ship';
-        }
-      }
-    }
-    // Mark misses on my grid
-    for (const shot of myData.incomingShots) {
-      if (shot.result === 'miss') {
-        myGrid[shot.coordinate.row][shot.coordinate.col] = 'miss';
-      }
-    }
-  }
-
-  // Build attack grids (what I know about each opponent)
-  const attackGrids: Record<string, CellState[][]> = {};
-  for (const targetId of state.turnOrder) {
-    if (targetId === playerId) continue;
-    const targetData = state.playerData[targetId];
-    if (!targetData) continue;
-
-    const grid: CellState[][] = Array.from({ length: gridSize }, () =>
-      Array.from({ length: gridSize }, () => 'empty' as CellState)
-    );
-
-    for (const shot of targetData.incomingShots) {
-      // Only show shots that THIS player fired (or all shots if target is eliminated for reveal)
-      // Actually, show ALL shots on the target — all players can see where hits/misses are
-      if (shot.result === 'miss') {
-        grid[shot.coordinate.row][shot.coordinate.col] = 'miss';
-      } else if (shot.result === 'hit') {
-        grid[shot.coordinate.row][shot.coordinate.col] = 'hit';
-      } else if (shot.result === 'sunk') {
-        grid[shot.coordinate.row][shot.coordinate.col] = 'sunk';
-      }
-    }
-
-    // Mark sunk ship cells
-    for (const ship of targetData.ships) {
-      if (ship.sunk) {
-        for (const cell of ship.cells) {
-          grid[cell.row][cell.col] = 'sunk';
-        }
-      }
-    }
-
-    attackGrids[targetId] = grid;
-  }
-
-  const activePlayerId = state.phase === 'battle' ? state.turnOrder[state.currentPlayerIndex] : null;
-  const totalShots = activePlayerId === playerId ? getShotsForTurn(roomCode, playerId) : 0;
-  const shotsFiredThisTurn = state.lastTurnShots.filter(s => s.playerId === playerId).length;
-  const shotsRemaining = Math.max(0, totalShots - shotsFiredThisTurn);
-
+const turnTimers = new Map<string, ReturnType<typeof setInterval>>();
+const phaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const TURN_TIMER_OPTIONS = [15, 30, 45, 0] as const;
+const PLACEMENT_TIMER_OPTIONS = [30, 60, 0] as const;
+
+/** Never trust settings from the client: clamp everything to the allowed options. */
+function sanitizeSettings(input?: Partial<BattleshipSettings>): BattleshipSettings {
+  const s = { ...DEFAULT_BATTLESHIP_SETTINGS, ...input };
   return {
-    phase: state.phase,
-    players,
-    myGrid,
-    myShipMap,
-    attackGrids,
-    activePlayerId,
-    isMyTurn: activePlayerId === playerId,
-    shotsRemaining,
-    currentTurnShots: state.lastTurnShots,
-    roundNumber: state.roundNumber,
-    settings: state.settings,
-    lastTurnSummary: state.lastTurnShots.length > 0 ? state.lastTurnShots : null,
-    sonarUsed: myData?.sonarUsed || false,
-    gridSize,
-    isFirstRound: state.roundNumber === 1 && state.currentPlayerIndex === 0,
+    maxPlayers: Math.min(BATTLESHIP_MAX_PLAYERS, Math.max(2, Math.floor(Number(s.maxPlayers)) || BATTLESHIP_MAX_PLAYERS)),
+    gridSize: s.gridSize === 10 ? 10 : 8,
+    shotMode: s.shotMode === 'salvo' ? 'salvo' : 'classic',
+    sonarPing: s.sonarPing === true,
+    turnTimer: (TURN_TIMER_OPTIONS as readonly number[]).includes(s.turnTimer) ? s.turnTimer : DEFAULT_BATTLESHIP_SETTINGS.turnTimer,
+    placementTimer: (PLACEMENT_TIMER_OPTIONS as readonly number[]).includes(s.placementTimer)
+      ? s.placementTimer
+      : DEFAULT_BATTLESHIP_SETTINGS.placementTimer,
   };
-}
-
-export function getGameState(roomCode: string): BattleshipServerState | undefined {
-  return games.get(roomCode);
-}
-
-export function swapPlayerId(roomCode: string, oldId: string, newId: string): void {
-  const state = games.get(roomCode);
-  if (!state) return;
-
-  // Swap in playerData
-  if (state.playerData[oldId]) {
-    state.playerData[newId] = state.playerData[oldId];
-    delete state.playerData[oldId];
-  }
-
-  // Swap in turnOrder
-  const turnIdx = state.turnOrder.indexOf(oldId);
-  if (turnIdx !== -1) state.turnOrder[turnIdx] = newId;
-
-  // Swap in eliminationOrder
-  const elimIdx = state.eliminationOrder.indexOf(oldId);
-  if (elimIdx !== -1) state.eliminationOrder[elimIdx] = newId;
-
-  // Swap in lastTurnShots
-  for (const shot of state.lastTurnShots) {
-    if (shot.playerId === oldId) shot.playerId = newId;
-    if (shot.targetId === oldId) shot.targetId = newId;
-  }
-
-  console.log(`[Battleship] Swapped player ID ${oldId} → ${newId}`);
-}
-
-export function endGame(roomCode: string): void {
-  clearRoomTimer(roomCode);
-  games.delete(roomCode);
-  console.log(`[Battleship] Game ended in ${roomCode}`);
-}
-
-export function setRoomTimer(roomCode: string, interval: ReturnType<typeof setInterval>): void {
-  clearRoomTimer(roomCode);
-  activeTimers.set(roomCode, interval);
-}
-
-export function clearRoomTimer(roomCode: string): void {
-  const existing = activeTimers.get(roomCode);
-  if (existing) {
-    clearInterval(existing);
-    activeTimers.delete(roomCode);
-  }
-}
-
-/**
- * Handle disconnected player's turn: fire random shots at random targets.
- */
-export function handleDisconnectedTurn(roomCode: string, room: Room): ShotEntry[] {
-  const state = games.get(roomCode);
-  if (!state || state.phase !== 'battle') return [];
-
-  const activeId = state.turnOrder[state.currentPlayerIndex];
-  if (!activeId) return [];
-
-  const totalShots = getShotsForTurn(roomCode, activeId);
-  // Subtract shots already fired this turn
-  const alreadyFired = state.lastTurnShots.filter(s => s.playerId === activeId).length;
-  const remainingShots = totalShots - alreadyFired;
-  if (remainingShots <= 0) return [];
-
-  const firedShots: ShotEntry[] = [];
-
-  const aliveTargets = state.turnOrder.filter(id => id !== activeId && state.playerData[id]?.alive);
-  if (aliveTargets.length === 0) return [];
-
-  for (let i = 0; i < remainingShots; i++) {
-    const targetId = aliveTargets[Math.floor(Math.random() * aliveTargets.length)];
-    const targetData = state.playerData[targetId];
-    if (!targetData) continue;
-
-    // Find a cell not yet shot
-    const gridSize = state.settings.gridSize;
-    const shotCells = new Set(targetData.incomingShots.map(s => `${s.coordinate.row},${s.coordinate.col}`));
-    const available: Coordinate[] = [];
-    for (let r = 0; r < gridSize; r++) {
-      for (let c = 0; c < gridSize; c++) {
-        if (!shotCells.has(`${r},${c}`)) available.push({ row: r, col: c });
-      }
-    }
-    if (available.length === 0) continue;
-
-    const coord = available[Math.floor(Math.random() * available.length)];
-    const result = fireShot(roomCode, activeId, targetId, coord, room);
-    if (result.success) {
-      firedShots.push({
-        playerId: activeId,
-        playerName: room.players[activeId]?.name || 'Unknown',
-        targetId,
-        targetName: room.players[targetId]?.name || 'Unknown',
-        coordinate: coord,
-        result: result.result!,
-        sunkShipName: result.sunkShipName,
-      });
-    }
-  }
-
-  return firedShots;
-}
-
-// ---- Internal helpers ----
-
-function getShipCells(placement: ShipPlacement, size: number): Coordinate[] {
-  const cells: Coordinate[] = [];
-  for (let i = 0; i < size; i++) {
-    if (placement.direction === 'horizontal') {
-      cells.push({ row: placement.start.row, col: placement.start.col + i });
-    } else {
-      cells.push({ row: placement.start.row + i, col: placement.start.col });
-    }
-  }
-  return cells;
-}
-
-function generateRandomPlacements(gridSize: number): ShipPlacement[] | null {
-  const placements: ShipPlacement[] = [];
-  const occupied = new Set<string>();
-
-  for (const ship of SHIPS) {
-    let placed = false;
-    for (let attempt = 0; attempt < 100; attempt++) {
-      const direction: 'horizontal' | 'vertical' = Math.random() < 0.5 ? 'horizontal' : 'vertical';
-      const maxRow = direction === 'vertical' ? gridSize - ship.size : gridSize - 1;
-      const maxCol = direction === 'horizontal' ? gridSize - ship.size : gridSize - 1;
-
-      const row = Math.floor(Math.random() * (maxRow + 1));
-      const col = Math.floor(Math.random() * (maxCol + 1));
-
-      const cells = getShipCells({ shipId: ship.id, start: { row, col }, direction }, ship.size);
-      const conflict = cells.some(c => occupied.has(`${c.row},${c.col}`));
-
-      if (!conflict) {
-        cells.forEach(c => occupied.add(`${c.row},${c.col}`));
-        placements.push({ shipId: ship.id, start: { row, col }, direction });
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) return null; // Failed to place (shouldn't happen with reasonable grid)
-  }
-
-  return placements;
 }
 
 function shuffleArray<T>(arr: T[]): void {
@@ -599,4 +50,514 @@ function shuffleArray<T>(arr: T[]): void {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
+}
+
+function playerName(state: BattleshipServerState, room: Room, id: string): string {
+  return room.players[id]?.name || state.playerData[id]?.name || 'Unknown';
+}
+
+function aliveIds(state: BattleshipServerState): string[] {
+  return state.turnOrder.filter(id => state.playerData[id]?.alive);
+}
+
+/** Next player with ships afloat, clockwise from a seat. */
+function nextAliveAfter(state: BattleshipServerState, id: string): string | null {
+  const n = state.turnOrder.length;
+  const start = Math.max(0, state.turnOrder.indexOf(id));
+  for (let step = 1; step <= n; step++) {
+    const candidate = state.turnOrder[(start + step) % n];
+    if (state.playerData[candidate]?.alive) return candidate;
+  }
+  return null;
+}
+
+function setFleet(pd: BattleshipServerPlayerData, placements: ShipPlacement[]): void {
+  pd.ships = placements.map(p => ({
+    shipId: p.shipId,
+    cells: shipCells(p, SHIPS.find(s => s.id === p.shipId)!.size),
+    hits: [],
+    sunk: false,
+  }));
+  pd.ready = true;
+}
+
+function finishIfOver(state: BattleshipServerState): boolean {
+  if (state.phase !== 'battle') return false;
+  const alive = aliveIds(state);
+  if (alive.length > 1) return false;
+  state.phase = 'finished';
+  state.winnerId = alive[0] ?? null;
+  state.activePlayerId = null;
+  return true;
+}
+
+// ---- Lifecycle ----
+
+export function createGame(room: Room, settings?: Partial<BattleshipSettings>): BattleshipServerState {
+  clearTimers(room.code);
+  const merged = sanitizeSettings(settings);
+
+  const playerIds = Object.keys(room.players).filter(id => room.players[id].connected);
+  shuffleArray(playerIds);
+
+  const playerData: Record<string, BattleshipServerPlayerData> = {};
+  for (const id of playerIds) {
+    playerData[id] = {
+      name: room.players[id].name,
+      avatar: room.players[id].avatar,
+      ships: [],
+      incomingShots: [],
+      alive: true,
+      ready: false,
+      left: false,
+      sonarUsed: false,
+      sonarScan: null,
+      stats: { shots: 0, hits: 0, sunk: 0 },
+    };
+  }
+
+  const state: BattleshipServerState = {
+    phase: 'placement',
+    playerData,
+    turnOrder: [...playerIds],
+    activePlayerId: null,
+    turnNumber: 0,
+    settings: merged,
+    turnShots: [],
+    previousTurn: null,
+    eliminationOrder: [],
+    winnerId: null,
+    placementTimerEnd: null,
+    turnTimerEnd: null,
+    turnTimerTotal: 0,
+    turnTimerPlayerId: null,
+  };
+
+  games.set(room.code, state);
+  console.log(`[Battleship] Game created in ${room.code} with ${playerIds.length} players`);
+  return state;
+}
+
+export function getGameState(roomCode: string): BattleshipServerState | undefined {
+  return games.get(roomCode);
+}
+
+export function endGame(roomCode: string): void {
+  clearTimers(roomCode);
+  games.delete(roomCode);
+  console.log(`[Battleship] Game ended in ${roomCode}`);
+}
+
+// ---- Placement ----
+
+export function placeShips(roomCode: string, playerId: string, placements: ShipPlacement[]): { success: boolean; error?: string } {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'placement') return { success: false, error: 'Not in placement phase' };
+  const pd = state.playerData[playerId];
+  if (!pd || pd.left) return { success: false, error: 'You are not in this game' };
+  if (pd.ready) return { success: false, error: 'Your fleet is already deployed' };
+
+  const error = fleetError(placements, state.settings.gridSize);
+  if (error) return { success: false, error };
+
+  // Keep only the fields we expect from the client
+  setFleet(pd, placements.map(p => ({
+    shipId: p.shipId,
+    start: { row: p.start.row, col: p.start.col },
+    direction: p.direction,
+  })));
+  return { success: true };
+}
+
+/** Placement clock ran out: random fleets for everyone still placing. */
+export function autoPlaceRemaining(roomCode: string): void {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'placement') return;
+  for (const id of state.turnOrder) {
+    const pd = state.playerData[id];
+    if (pd && !pd.ready && !pd.left) setFleet(pd, randomFleet(state.settings.gridSize));
+  }
+}
+
+/** Every connected player has deployed (offline players don't hold the battle up). */
+export function allPlayersReady(roomCode: string, room: Room): boolean {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'placement') return false;
+  const connected = state.turnOrder.filter(id => room.players[id]?.connected && !state.playerData[id]?.left);
+  return connected.length > 0 && connected.every(id => state.playerData[id]?.ready);
+}
+
+/** Battle starts with everyone who deployed. Players who never placed watch. */
+export function startBattle(roomCode: string): boolean {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'placement') return false;
+
+  state.turnOrder = state.turnOrder.filter(id => state.playerData[id]?.ready && !state.playerData[id]?.left);
+  state.placementTimerEnd = null;
+  state.phase = 'battle';
+  state.turnNumber = 1;
+  state.activePlayerId = state.turnOrder[0] ?? null;
+  finishIfOver(state); // fewer than 2 fleets: nothing to fight
+  return true;
+}
+
+// ---- Battle ----
+
+export function getShotsForTurn(roomCode: string, playerId: string): number {
+  const state = games.get(roomCode);
+  const pd = state?.playerData[playerId];
+  if (!state || !pd || !pd.alive) return 0;
+  if (state.settings.shotMode === 'classic') return 1;
+  // Salvo: one shot per ship still afloat
+  return pd.ships.filter(s => !s.sunk).length;
+}
+
+export function getShotsRemainingForTurn(roomCode: string, playerId: string): number {
+  const state = games.get(roomCode);
+  if (!state || state.activePlayerId !== playerId) return 0;
+  const fired = state.turnShots.filter(s => s.playerId === playerId).length;
+  return Math.max(0, getShotsForTurn(roomCode, playerId) - fired);
+}
+
+export function fireShot(
+  roomCode: string,
+  playerId: string,
+  targetId: string,
+  coordinate: Coordinate,
+  room: Room,
+  auto = false,
+): { success: boolean; shot?: ShotEntry; error?: string } {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'battle') return { success: false, error: 'Not in battle phase' };
+  if (state.activePlayerId !== playerId) return { success: false, error: 'Not your turn' };
+  if (!state.playerData[playerId]?.alive) return { success: false, error: 'Your fleet is sunk' };
+  if (getShotsRemainingForTurn(roomCode, playerId) <= 0) return { success: false, error: 'No shots left this turn' };
+  if (targetId === playerId) return { success: false, error: 'You can’t fire at your own fleet' };
+
+  const targetData = state.playerData[targetId];
+  if (!targetData?.alive) return { success: false, error: 'That fleet is already sunk' };
+
+  const row = Number(coordinate?.row);
+  const col = Number(coordinate?.col);
+  const gridSize = state.settings.gridSize;
+  if (!Number.isInteger(row) || !Number.isInteger(col) || row < 0 || row >= gridSize || col < 0 || col >= gridSize) {
+    return { success: false, error: 'Invalid coordinate' };
+  }
+  if (targetData.incomingShots.some(s => s.coordinate.row === row && s.coordinate.col === col)) {
+    return { success: false, error: 'Already fired there' };
+  }
+
+  let result: ShotResult = 'miss';
+  let sunkShipName: string | undefined;
+  for (const ship of targetData.ships) {
+    if (ship.sunk || !ship.cells.some(c => c.row === row && c.col === col)) continue;
+    ship.hits.push({ row, col });
+    if (ship.hits.length >= ship.cells.length) {
+      ship.sunk = true;
+      result = 'sunk';
+      sunkShipName = SHIPS.find(s => s.id === ship.shipId)?.name;
+    } else {
+      result = 'hit';
+    }
+    break;
+  }
+
+  targetData.incomingShots.push({ coordinate: { row, col }, result });
+  const stats = state.playerData[playerId].stats;
+  stats.shots++;
+  if (result !== 'miss') stats.hits++;
+  if (result === 'sunk') stats.sunk++;
+
+  const shot: ShotEntry = {
+    playerId,
+    playerName: playerName(state, room, playerId),
+    targetId,
+    targetName: playerName(state, room, targetId),
+    coordinate: { row, col },
+    result,
+    ...(sunkShipName ? { sunkShipName } : {}),
+    ...(auto ? { auto: true } : {}),
+  };
+  state.turnShots.push(shot);
+
+  if (targetData.ships.every(s => s.sunk)) {
+    targetData.alive = false;
+    if (!state.eliminationOrder.includes(targetId)) state.eliminationOrder.push(targetId);
+  }
+  finishIfOver(state);
+
+  return { success: true, shot };
+}
+
+/** Hand the turn on from `fromId` to the next fleet still afloat (keeping a recap of the turn). */
+function passTurn(state: BattleshipServerState, fromId: string, room: Room): void {
+  state.previousTurn = { playerId: fromId, playerName: playerName(state, room, fromId), shots: state.turnShots };
+  state.turnShots = [];
+  state.activePlayerId = nextAliveAfter(state, fromId);
+  state.turnNumber++;
+}
+
+export function endTurn(roomCode: string, room: Room): boolean {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'battle' || !state.activePlayerId) return false;
+  if (finishIfOver(state)) return true;
+  passTurn(state, state.activePlayerId, room);
+  return true;
+}
+
+export function pingSonar(
+  roomCode: string,
+  playerId: string,
+  targetId: string,
+  topLeft: Coordinate,
+): { success: boolean; error?: string } {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'battle') return { success: false, error: 'Not in battle phase' };
+  if (!state.settings.sonarPing) return { success: false, error: 'Sonar is off in this game' };
+  if (state.activePlayerId !== playerId) return { success: false, error: 'Not your turn' };
+  if (getShotsRemainingForTurn(roomCode, playerId) <= 0) return { success: false, error: 'Your turn is over' };
+
+  const pd = state.playerData[playerId];
+  if (!pd || pd.sonarUsed) return { success: false, error: 'Sonar already used' };
+  const targetData = state.playerData[targetId];
+  if (targetId === playerId || !targetData?.alive) return { success: false, error: 'Pick an opponent still afloat' };
+
+  const area = clampSonar(topLeft ?? { row: 0, col: 0 }, state.settings.gridSize);
+  const hasShip = targetData.ships.some(ship => !ship.sunk && ship.cells.some(c =>
+    c.row >= area.row && c.row < area.row + 2 && c.col >= area.col && c.col < area.col + 2));
+
+  pd.sonarUsed = true;
+  pd.sonarScan = { targetId, topLeft: area, hasShip };
+  return { success: true };
+}
+
+/**
+ * The turn timer ran out, or the player is away: fire their remaining shots at random
+ * open water on random fleets still afloat. Returns the shots fired.
+ */
+export function autoFire(roomCode: string, room: Room): ShotEntry[] {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'battle' || !state.activePlayerId) return [];
+  const shooter = state.activePlayerId;
+  const fired: ShotEntry[] = [];
+  const gridSize = state.settings.gridSize;
+
+  while (state.phase === 'battle' && getShotsRemainingForTurn(roomCode, shooter) > 0) {
+    const targets = aliveIds(state).filter(id => id !== shooter);
+    if (targets.length === 0) break;
+    const targetId = targets[Math.floor(Math.random() * targets.length)];
+    const shot = new Set(state.playerData[targetId].incomingShots.map(s => `${s.coordinate.row},${s.coordinate.col}`));
+    const open: Coordinate[] = [];
+    for (let r = 0; r < gridSize; r++) {
+      for (let c = 0; c < gridSize; c++) if (!shot.has(`${r},${c}`)) open.push({ row: r, col: c });
+    }
+    if (open.length === 0) break;
+    const result = fireShot(roomCode, shooter, targetId, open[Math.floor(Math.random() * open.length)], room, true);
+    if (!result.success || !result.shot) break;
+    fired.push(result.shot);
+  }
+  return fired;
+}
+
+/**
+ * A player left the room for good. While placing they're simply dropped; in battle
+ * their fleet is scuttled (they're out). Returns true if the game changed.
+ */
+export function removePlayer(roomCode: string, playerId: string, room: Room): boolean {
+  const state = games.get(roomCode);
+  const pd = state?.playerData[playerId];
+  if (!state || !pd || pd.left || state.phase === 'finished') return false;
+
+  pd.left = true;
+  if (state.phase === 'placement') {
+    state.turnOrder = state.turnOrder.filter(id => id !== playerId);
+    return true;
+  }
+
+  if (pd.alive) {
+    pd.alive = false;
+    if (!state.eliminationOrder.includes(playerId)) state.eliminationOrder.push(playerId);
+  }
+  if (finishIfOver(state)) return true;
+  if (state.activePlayerId === playerId) passTurn(state, playerId, room);
+  return true;
+}
+
+// ---- Client view ----
+
+function emptyGrid<T>(size: number, value: T): T[][] {
+  return Array.from({ length: size }, () => Array.from({ length: size }, () => value));
+}
+
+export function getClientState(roomCode: string, playerId: string, room: Room): BattleshipClientState | null {
+  const state = games.get(roomCode);
+  if (!state) return null;
+  const gridSize = state.settings.gridSize;
+
+  const players: BattleshipPlayerInfo[] = state.turnOrder.map(id => {
+    const pd = state.playerData[id];
+    const rp = room.players[id];
+    return {
+      id,
+      name: playerName(state, room, id),
+      avatar: rp?.avatar || pd?.avatar || '⚓',
+      alive: pd?.alive ?? false,
+      connected: rp?.connected ?? false,
+      shipsRemaining: pd?.ships.filter(s => !s.sunk).length ?? 0,
+      totalShips: SHIPS.length,
+      ready: pd?.ready ?? false,
+      left: pd?.left ?? true,
+      stats: { ...(pd?.stats ?? { shots: 0, hits: 0, sunk: 0 }) },
+    };
+  });
+
+  // My ocean: my ships plus every shot fired at me
+  const myData = state.playerData[playerId];
+  const inGame = state.turnOrder.includes(playerId);
+  const myGrid = emptyGrid<CellState>(gridSize, 'empty');
+  const myShipMap = emptyGrid<string | null>(gridSize, null);
+  if (myData && inGame) {
+    for (const ship of myData.ships) {
+      for (const cell of ship.cells) {
+        myShipMap[cell.row][cell.col] = ship.shipId;
+        myGrid[cell.row][cell.col] = ship.sunk
+          ? 'sunk'
+          : ship.hits.some(h => h.row === cell.row && h.col === cell.col) ? 'hit' : 'ship';
+      }
+    }
+    for (const shot of myData.incomingShots) {
+      if (shot.result === 'miss') myGrid[shot.coordinate.row][shot.coordinate.col] = 'miss';
+    }
+  }
+
+  // Every opponent's ocean as everyone knows it: all shots are public
+  const attackGrids: Record<string, CellState[][]> = {};
+  for (const targetId of state.turnOrder) {
+    if (targetId === playerId) continue;
+    const targetData = state.playerData[targetId];
+    if (!targetData) continue;
+    const grid = emptyGrid<CellState>(gridSize, 'empty');
+    for (const shot of targetData.incomingShots) grid[shot.coordinate.row][shot.coordinate.col] = shot.result;
+    for (const ship of targetData.ships) {
+      if (ship.sunk) for (const cell of ship.cells) grid[cell.row][cell.col] = 'sunk';
+    }
+    attackGrids[targetId] = grid;
+  }
+
+  const activeId = state.phase === 'battle' ? state.activePlayerId : null;
+  return {
+    phase: state.phase,
+    players,
+    myGrid,
+    myShipMap,
+    attackGrids,
+    activePlayerId: activeId,
+    isMyTurn: !!activeId && activeId === playerId,
+    shotsRemaining: activeId === playerId ? getShotsRemainingForTurn(roomCode, playerId) : 0,
+    shotsThisTurn: activeId ? getShotsForTurn(roomCode, activeId) : 0,
+    turnShots: state.turnShots,
+    previousTurn: state.previousTurn,
+    turnNumber: state.turnNumber,
+    settings: state.settings,
+    gridSize,
+    sonarUsed: myData?.sonarUsed ?? false,
+    mySonar: myData?.sonarScan ?? null,
+    eliminationOrder: [...state.eliminationOrder],
+    winnerId: state.winnerId,
+    inGame,
+  };
+}
+
+export function getTurnTimerSnapshot(roomCode: string): BattleshipTimer | null {
+  const state = games.get(roomCode);
+  if (!state) return null;
+  if (state.phase === 'battle' && state.turnTimerEnd && state.turnTimerPlayerId) {
+    return {
+      playerId: state.turnTimerPlayerId,
+      secondsLeft: Math.max(0, Math.ceil((state.turnTimerEnd - Date.now()) / 1000)),
+      total: state.turnTimerTotal,
+    };
+  }
+  if (state.phase === 'placement' && state.placementTimerEnd) {
+    return {
+      playerId: null,
+      secondsLeft: Math.max(0, Math.ceil((state.placementTimerEnd - Date.now()) / 1000)),
+      total: state.settings.placementTimer,
+    };
+  }
+  return null;
+}
+
+// ---- Reconnection ----
+
+export function swapPlayerId(roomCode: string, oldId: string, newId: string): void {
+  const state = games.get(roomCode);
+  if (!state) return;
+  const swap = (id: string) => (id === oldId ? newId : id);
+
+  if (state.playerData[oldId]) {
+    state.playerData[newId] = state.playerData[oldId];
+    delete state.playerData[oldId];
+  }
+  state.turnOrder = state.turnOrder.map(swap);
+  state.eliminationOrder = state.eliminationOrder.map(swap);
+  if (state.activePlayerId) state.activePlayerId = swap(state.activePlayerId);
+  if (state.turnTimerPlayerId) state.turnTimerPlayerId = swap(state.turnTimerPlayerId);
+  if (state.winnerId) state.winnerId = swap(state.winnerId);
+
+  const swapShot = (shot: ShotEntry) => {
+    shot.playerId = swap(shot.playerId);
+    shot.targetId = swap(shot.targetId);
+  };
+  state.turnShots.forEach(swapShot);
+  if (state.previousTurn) {
+    state.previousTurn.playerId = swap(state.previousTurn.playerId);
+    state.previousTurn.shots.forEach(swapShot);
+  }
+  for (const pd of Object.values(state.playerData)) {
+    if (pd.sonarScan) pd.sonarScan.targetId = swap(pd.sonarScan.targetId);
+  }
+
+  console.log(`[Battleship] Swapped player ID ${oldId} → ${newId}`);
+}
+
+// ---- Timers (one clock + one pending step per room) ----
+
+export function setTurnTimer(roomCode: string, interval: ReturnType<typeof setInterval>): void {
+  clearTurnTimer(roomCode);
+  turnTimers.set(roomCode, interval);
+}
+
+export function clearTurnTimer(roomCode: string): void {
+  const t = turnTimers.get(roomCode);
+  if (t) {
+    clearInterval(t);
+    turnTimers.delete(roomCode);
+  }
+}
+
+export function hasTurnTimer(roomCode: string): boolean {
+  return turnTimers.has(roomCode);
+}
+
+export function setPhaseTimer(roomCode: string, timeout: ReturnType<typeof setTimeout>): void {
+  clearPhaseTimer(roomCode);
+  phaseTimers.set(roomCode, timeout);
+}
+
+export function clearPhaseTimer(roomCode: string): void {
+  const t = phaseTimers.get(roomCode);
+  if (t) {
+    clearTimeout(t);
+    phaseTimers.delete(roomCode);
+  }
+}
+
+export function hasPhaseTimer(roomCode: string): boolean {
+  return phaseTimers.has(roomCode);
+}
+
+function clearTimers(roomCode: string): void {
+  clearTurnTimer(roomCode);
+  clearPhaseTimer(roomCode);
 }

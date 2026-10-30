@@ -1,213 +1,173 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { LD_AUTO_ROLL_MS, countMatches } from '@/types/games/liars-dice';
 import DiceIcon from './DiceIcon';
+
+const TUMBLE_MS = 950;
+const SHAKE_THRESHOLD = 24; // m/s² including gravity
+
+type MotionPermission = 'granted' | 'denied' | 'needs-tap';
+
+type MotionEventWithPermission = typeof DeviceMotionEvent & { requestPermission?: () => Promise<'granted' | 'denied'> };
+
+function detectMotion(): MotionPermission {
+  if (typeof window === 'undefined' || !('DeviceMotionEvent' in window)) return 'denied';
+  const DME = window.DeviceMotionEvent as MotionEventWithPermission;
+  return typeof DME.requestPermission === 'function' ? 'needs-tap' : 'granted';
+}
+
+function randomFaces(n: number): number[] {
+  return Array.from({ length: n }, () => Math.floor(Math.random() * 6) + 1);
+}
 
 interface DiceDisplayProps {
   dice: number[];
-  phase: string;
+  rollingPhase: boolean;      // the round's rolling phase is on
+  alreadyRolled: boolean;     // the server has my roll (e.g. after a reconnect)
   wildOnes: boolean;
+  focusFace: number | null;   // face to highlight (current bid, or the face being bid)
+  waitingFor: string[];       // names still rolling
   onRollComplete: () => void;
-  highlightFace?: number | null; // face value to highlight (from current bid)
+  compactOnShortScreens?: boolean; // the bid builder is open: smaller tray on short phones
 }
 
-export default function DiceDisplay({ dice, phase, wildOnes, onRollComplete, highlightFace }: DiceDisplayProps) {
-  const [rolling, setRolling] = useState(false);
-  const [rolled, setRolled] = useState(false);
-  const [motionPermission, setMotionPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
-  const shakeDetected = useRef(false);
-  const autoRollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+/** Your five dice: shake (or tap) to roll in the rolling phase, then matches light up while bidding. */
+export default function DiceDisplay({
+  dice, rollingPhase, alreadyRolled, wildOnes, focusFace, waitingFor, onRollComplete, compactOnShortScreens = false,
+}: DiceDisplayProps) {
+  const [tumbling, setTumbling] = useState(false);
+  const [rolledLocal, setRolledLocal] = useState(false);
+  const [faces, setFaces] = useState<number[]>(() => randomFaces(dice.length || 5));
+  // Phones that don't need a permission prompt (Android) can shake straight away; iOS asks first
+  const [motion, setMotion] = useState<MotionPermission>(detectMotion);
+  const startedRef = useRef(false);
 
-  const isRollingPhase = phase === 'rolling';
-
-  // Request DeviceMotion permission (iOS)
-  const requestMotionPermission = useCallback(async () => {
-    const DME = window.DeviceMotionEvent as typeof DeviceMotionEvent & {
-      requestPermission?: () => Promise<'granted' | 'denied'>;
-    };
-    if (typeof DME?.requestPermission === 'function') {
-      try {
-        const result = await DME.requestPermission();
-        setMotionPermission(result);
-        return result === 'granted';
-      } catch {
-        setMotionPermission('denied');
-        return false;
-      }
-    }
-    // Non-iOS — permission not needed
-    setMotionPermission('granted');
-    return true;
-  }, []);
-
-  const triggerRoll = useCallback(() => {
-    if (rolled || !isRollingPhase) return;
-    shakeDetected.current = true;
-    setRolling(true);
-
-    // Haptic feedback
-    if (navigator.vibrate) {
-      navigator.vibrate([30, 50, 30]);
-    }
-
-    // Roll animation duration
-    setTimeout(() => {
-      setRolling(false);
-      setRolled(true);
-      onRollComplete();
-    }, 1500);
-  }, [rolled, isRollingPhase, onRollComplete]);
-
-  // Shake detection via DeviceMotion
-  useEffect(() => {
-    if (!isRollingPhase || rolled) return;
-
-    const handleMotion = (e: DeviceMotionEvent) => {
-      if (shakeDetected.current) return;
-      const acc = e.accelerationIncludingGravity;
-      if (!acc) return;
-
-      const magnitude = Math.sqrt(
-        (acc.x || 0) ** 2 + (acc.y || 0) ** 2 + (acc.z || 0) ** 2
-      );
-
-      if (magnitude > 25) {
-        triggerRoll();
-      }
-    };
-
-    if (motionPermission === 'granted') {
-      window.addEventListener('devicemotion', handleMotion);
-    }
-
-    return () => {
-      window.removeEventListener('devicemotion', handleMotion);
-    };
-  }, [isRollingPhase, rolled, motionPermission, triggerRoll]);
-
-  // Auto-roll fallback after 4s
-  useEffect(() => {
-    if (!isRollingPhase || rolled) return;
-
-    autoRollTimer.current = setTimeout(() => {
-      if (!shakeDetected.current) {
-        triggerRoll();
-      }
-    }, 4500);
-
-    return () => {
-      if (autoRollTimer.current) {
-        clearTimeout(autoRollTimer.current);
-      }
-    };
-  }, [isRollingPhase, rolled, triggerRoll]);
-
-  // Reset state on new round (phase changes to rolling) — adjusted during render, not in an effect
-  const [prevRollingPhase, setPrevRollingPhase] = useState(isRollingPhase);
-  if (isRollingPhase !== prevRollingPhase) {
-    setPrevRollingPhase(isRollingPhase);
-    if (isRollingPhase) {
-      setRolled(false);
-      setRolling(false);
+  // New round: allow a fresh roll (adjusting state while rendering)
+  const [prevRolling, setPrevRolling] = useState(rollingPhase);
+  if (rollingPhase !== prevRolling) {
+    setPrevRolling(rollingPhase);
+    if (rollingPhase) {
+      setRolledLocal(false);
+      setTumbling(false);
     }
   }
-
-  // New round: allow a fresh shake / auto-roll (refs can only be written outside render)
   useEffect(() => {
-    if (isRollingPhase) shakeDetected.current = false;
-  }, [isRollingPhase]);
+    if (rollingPhase) startedRef.current = false;
+  }, [rollingPhase]);
 
-  // Sort dice for display: group same values together
-  const sortedDice = [...dice].sort((a, b) => a - b);
+  const rolled = rolledLocal || alreadyRolled || !rollingPhase;
 
-  // Determine if a die should be highlighted based on current bid face
-  const shouldHighlight = (value: number): boolean => {
-    if (!highlightFace) return false;
-    if (value === highlightFace) return true;
-    if (wildOnes && value === 1 && highlightFace !== 1) return true;
-    return false;
+  const roll = useCallback(() => {
+    if (startedRef.current || !rollingPhase || alreadyRolled) return;
+    startedRef.current = true;
+    setTumbling(true);
+    navigator.vibrate?.([30, 40, 30, 40, 60]);
+  }, [rollingPhase, alreadyRolled]);
+
+  // Tumble: faces flicker, then land on the real roll
+  useEffect(() => {
+    if (!tumbling) return;
+    const flicker = setInterval(() => setFaces(randomFaces(5)), 85);
+    const land = setTimeout(() => {
+      clearInterval(flicker);
+      setTumbling(false);
+      setRolledLocal(true);
+      navigator.vibrate?.(25);
+      onRollComplete();
+    }, TUMBLE_MS);
+    return () => {
+      clearInterval(flicker);
+      clearTimeout(land);
+    };
+  }, [tumbling, onRollComplete]);
+
+  const askMotion = async () => {
+    const DME = window.DeviceMotionEvent as MotionEventWithPermission;
+    try {
+      const res = await DME.requestPermission?.();
+      setMotion(res === 'granted' ? 'granted' : 'denied');
+    } catch {
+      setMotion('denied');
+    }
   };
 
-  // Count matching dice
-  const matchCount = highlightFace
-    ? sortedDice.filter(d => shouldHighlight(d)).length
-    : 0;
+  // Shake to roll
+  useEffect(() => {
+    if (!rollingPhase || rolled || motion !== 'granted') return;
+    const onMotion = (e: DeviceMotionEvent) => {
+      const a = e.accelerationIncludingGravity;
+      if (!a) return;
+      const magnitude = Math.sqrt((a.x ?? 0) ** 2 + (a.y ?? 0) ** 2 + (a.z ?? 0) ** 2);
+      if (magnitude > SHAKE_THRESHOLD) roll();
+    };
+    window.addEventListener('devicemotion', onMotion);
+    return () => window.removeEventListener('devicemotion', onMotion);
+  }, [rollingPhase, rolled, motion, roll]);
+
+  // Nobody waits on a forgotten phone: roll automatically
+  useEffect(() => {
+    if (!rollingPhase || rolled) return;
+    const t = setTimeout(roll, LD_AUTO_ROLL_MS);
+    return () => clearTimeout(t);
+  }, [rollingPhase, rolled, roll]);
+
+  const sorted = [...dice].sort((a, b) => a - b);
+  const showHidden = rollingPhase && !rolled && !tumbling;
+  const shown = tumbling ? faces : sorted;
+  const matches = focusFace ? countMatches(sorted, focusFace, wildOnes) : 0;
 
   return (
-    <div className="flex flex-col items-center gap-3">
-      {/* Label with match count */}
-      <div className="flex items-center gap-2">
-        <p className="text-[9px] uppercase tracking-wider text-(--text-muted)/70">Your Dice</p>
-        {highlightFace && matchCount > 0 && (
-          <span className="text-[9px] font-bold text-(--game-accent) bg-(--game-accent-dim) px-1.5 py-0.5 rounded">
-            {matchCount} match{matchCount !== 1 ? 'es' : ''}
+    <section className={`flex flex-col items-center gap-2 px-4 ${compactOnShortScreens ? 'ld-compact' : ''}`} aria-label="Your dice">
+      <div className="ld-dice-label flex w-full items-center justify-between">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">Your dice · only you can see them</p>
+        {!rollingPhase && focusFace && (
+          <span className="flex items-center gap-1 rounded-full bg-(--game-accent-dim) px-2 py-0.5 text-[11px] font-semibold text-(--game-accent)">
+            You hold {matches}
+            <DiceIcon value={focusFace} size={14} wild={wildOnes} />
           </span>
         )}
       </div>
 
-      {/* Dice tray */}
-      <div
-        className={`flex justify-center gap-2.5 px-4 py-3 rounded-2xl ${
-          rolling ? 'animate-dice-roll' : ''
-        }`}
-        style={{
-          background: 'linear-gradient(145deg, rgba(23,21,37,0.8), rgba(10,10,16,0.6))',
-          border: '1px solid var(--border)',
-          boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.3)',
-        }}
-      >
-        {sortedDice.map((value, i) => (
+      <div className={`ld-tray flex w-full justify-center gap-2 rounded-2xl px-3 py-3 ${tumbling ? 'animate-dice-roll' : ''}`}>
+        {(shown.length ? shown : [1, 2, 3, 4, 5]).map((value, i) => (
           <DiceIcon
-            key={`${phase}-${i}`}
+            key={`${i}-${rolled ? 'up' : 'down'}`}
             value={value}
-            size={52}
-            hidden={isRollingPhase && !rolled}
-            wild={wildOnes}
-            highlighted={shouldHighlight(value)}
-            className={rolled && isRollingPhase ? 'animate-fade-in' : ''}
+            size={48}
+            hidden={showHidden || dice.length === 0}
+            wild={wildOnes && !tumbling}
+            highlighted={!tumbling && !rollingPhase && !!focusFace && countMatches([value], focusFace, wildOnes) > 0}
+            dim={!tumbling && !rollingPhase && !!focusFace && countMatches([value], focusFace, wildOnes) === 0}
+            className={tumbling ? 'ld-die-tumble' : rolled && rollingPhase ? 'ld-die-land' : ''}
+            style={tumbling ? { animationDelay: `${i * 40}ms` } : rolled && rollingPhase ? { animationDelay: `${i * 60}ms` } : undefined}
           />
         ))}
       </div>
 
-      {/* Roll controls (only during rolling phase) */}
-      {isRollingPhase && !rolled && !rolling && (
-        <div className="flex flex-col items-center gap-2 animate-fade-in">
-          {motionPermission === 'prompt' && (
-            <button
-              onClick={requestMotionPermission}
-              className="text-xs px-4 py-2 rounded-lg bg-(--bg-elevated) border border-(--border) text-(--text-secondary) active:scale-95 transition-transform"
-            >
-              📱 Enable shake to roll
-            </button>
-          )}
-
+      {rollingPhase && !rolled && !tumbling && (
+        <div className="flex w-full flex-col items-center gap-2">
           <button
-            onClick={triggerRoll}
-            className="px-8 py-3.5 bg-(--game-accent) text-white rounded-xl font-semibold text-sm active:scale-95 transition-all shadow-lg"
-            style={{ boxShadow: '0 4px 14px rgba(231,76,60,0.3)' }}
+            type="button"
+            onClick={roll}
+            className="h-14 w-full rounded-2xl bg-(--game-accent) font-heading text-base font-semibold text-(--bg-primary) shadow-lg transition-transform active:scale-[0.97] ld-roll-btn"
           >
-            🎲 Tap to Roll
+            🎲 Tap to roll
           </button>
-
-          {motionPermission === 'granted' && (
-            <p className="text-[10px] text-(--text-muted)">or shake your phone!</p>
+          {motion === 'granted' && <p className="text-xs text-(--text-muted)">…or give your phone a shake</p>}
+          {motion === 'needs-tap' && (
+            <button type="button" onClick={askMotion} className="min-h-11 px-3 text-xs text-(--text-secondary) underline-offset-2 hover:underline">
+              📱 Turn on shake to roll
+            </button>
           )}
         </div>
       )}
-
-      {/* Rolling animation message */}
-      {isRollingPhase && rolling && (
-        <p className="text-xs text-(--text-secondary) animate-soft-pulse">
-          Rolling...
+      {rollingPhase && tumbling && <p className="text-sm text-(--text-secondary) animate-soft-pulse">Rolling…</p>}
+      {rollingPhase && rolled && !tumbling && (
+        <p className="text-xs text-(--text-muted)" role="status">
+          {waitingFor.length > 0 ? `Waiting for ${waitingFor.join(', ')} to roll…` : 'Everyone has rolled'}
         </p>
       )}
-
-      {/* Waiting message after roll */}
-      {isRollingPhase && rolled && !rolling && (
-        <p className="text-xs text-(--text-muted) animate-soft-pulse">
-          Waiting for others to roll...
-        </p>
-      )}
-    </div>
+    </section>
   );
 }

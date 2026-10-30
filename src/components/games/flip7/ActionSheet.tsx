@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Flip7PlayerInfo, PendingAction } from '@/types/games/flip7';
 import { ACTION_CARD_LABELS, computeRoundScore } from '@/types/games/flip7';
 import { CardFace, ModifierChip, NumberCard, SecondChanceChip } from './CardArt';
-import TimerBar from './TimerBar';
+import TimerBar from '@/components/shared/TimerBar';
 
 interface ActionSheetProps {
   pending: PendingAction;

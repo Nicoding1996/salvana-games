@@ -6,70 +6,52 @@ import DiceIcon from './DiceIcon';
 
 interface BidHistoryProps {
   entries: BidHistoryEntry[];
+  myId: string | null;
+  wildOnes: boolean;
+  /** One line with an inline label, so the bid builder below keeps its room */
+  compact: boolean;
 }
 
-export default function BidHistory({ entries }: BidHistoryProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+/** This round's bids as a trail of chips, newest on the right. */
+export default function BidHistory({ entries, myId, wildOnes, compact }: BidHistoryProps) {
+  const scrollRef = useRef<HTMLOListElement>(null);
 
-  // Auto-scroll to bottom on new entries
+  // Keep the newest bid in view
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ left: el.scrollWidth, behavior: 'smooth' });
   }, [entries.length]);
 
-  if (entries.length === 0) {
-    return (
-      <div className="text-center py-3 text-xs text-(--text-muted)">
-        No bids yet — first player is up
-      </div>
-    );
-  }
+  const bids = entries.filter(e => e.type === 'bid');
+  if (bids.length < 2) return null; // the current bid card already shows the only bid
 
   return (
-    <div
-      ref={scrollRef}
-      className="max-h-[130px] overflow-y-auto space-y-1 px-1 py-1 scrollbar-thin"
-      role="log"
-      aria-label="Bid history"
-    >
-      {entries.map((entry, i) => (
-        <div
-          key={i}
-          className={`flex items-center gap-2 text-sm py-1.5 px-2.5 rounded-xl animate-fade-in ${
-            entry.type === 'liar'
-              ? 'bg-(--danger)/10 border border-(--danger)/15'
-              : entry.type === 'spotOn'
-              ? 'bg-(--game-secondary)/10 border border-(--game-secondary)/15'
-              : i === entries.length - 1
-              ? 'bg-(--bg-elevated) border border-(--border)'
-              : 'border border-transparent'
-          }`}
-        >
-          <span className="text-base shrink-0">{entry.playerAvatar}</span>
-          <span className="text-(--text-secondary) truncate max-w-[72px] text-xs font-medium">
-            {entry.playerName}
-          </span>
-
-          <div className="flex-1" />
-
-          {entry.type === 'bid' && (
-            <div className="flex items-center gap-1">
-              <span className="text-(--text-primary) font-bold text-sm">{entry.quantity}</span>
-              <span className="text-(--text-muted) text-xs">×</span>
-              <DiceIcon value={entry.faceValue} size={22} />
-            </div>
-          )}
-
-          {entry.type === 'liar' && (
-            <span className="text-(--danger) font-bold text-sm">🤥 LIAR!</span>
-          )}
-
-          {entry.type === 'spotOn' && (
-            <span className="text-(--game-secondary) font-bold text-sm">🎯 SPOT ON!</span>
-          )}
-        </div>
-      ))}
+    <div className={compact ? 'flex items-center gap-2 px-4' : 'px-4'}>
+      <p className={`shrink-0 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted) ${compact ? '' : 'mb-1'}`} aria-hidden="true">
+        {compact ? 'Bids' : 'Bids this round'}
+      </p>
+      <ol ref={scrollRef} className="no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto py-0.5" aria-label="Bids this round" role="log">
+        {bids.map((entry, i) => {
+          const latest = i === bids.length - 1;
+          return (
+            <li key={i} className="flex shrink-0 items-center gap-1">
+              {i > 0 && <span className="text-[10px] text-(--text-muted)" aria-hidden="true">›</span>}
+              <span
+                className={`flex items-center gap-1 rounded-full border py-0.5 pl-1.5 pr-1 text-xs ${
+                  latest ? 'border-(--game-accent)/50 bg-(--game-accent-dim) text-(--text-primary)' : 'border-(--border) bg-(--bg-card) text-(--text-secondary)'
+                }`}
+                aria-label={`${entry.playerId === myId ? 'You' : entry.playerName}: ${entry.quantity} × ${entry.faceValue}${entry.auto ? ' (auto)' : ''}`}
+              >
+                <span aria-hidden="true">{entry.playerAvatar}</span>
+                <span className="font-bold tabular-nums">{entry.quantity}</span>
+                <span className="text-(--text-muted)" aria-hidden="true">×</span>
+                <DiceIcon value={entry.faceValue} size={18} wild={wildOnes} />
+                {entry.auto && <span className="text-[10px]" aria-hidden="true">⏱️</span>}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }

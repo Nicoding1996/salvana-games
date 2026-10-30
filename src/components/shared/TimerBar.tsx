@@ -5,10 +5,12 @@ import { useState } from 'react';
 interface TimerBarProps {
   seconds: number;
   total: number;
+  /** At or below this many seconds the bar turns red */
+  urgentAt?: number;
 }
 
 /** Thin countdown bar. Drains smoothly between the server's once-a-second ticks. */
-export default function TimerBar({ seconds, total }: TimerBarProps) {
+export default function TimerBar({ seconds, total, urgentAt = 5 }: TimerBarProps) {
   // A new countdown makes the value jump up. Refill instantly instead of
   // animating backwards (React's "adjust state while rendering" pattern).
   const [prev, setPrev] = useState(seconds);
@@ -33,7 +35,7 @@ export default function TimerBar({ seconds, total }: TimerBarProps) {
         style={{
           width: `${pct}%`,
           transition: instant ? 'none' : 'width 1s linear',
-          background: seconds <= 5 ? 'var(--danger)' : 'var(--game-accent)',
+          background: seconds <= urgentAt ? 'var(--danger)' : 'var(--game-accent)',
         }}
       />
     </div>

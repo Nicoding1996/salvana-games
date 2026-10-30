@@ -23,7 +23,7 @@ export const GAME_RULES: Record<string, GameRulesData> = {
   'story-thief': {
     icon: '📜',
     name: "Whose Truth?",
-    summary: "A team bluffing game. Everyone writes a true story about themselves. Each round, one story is read — the whole team claims it's theirs. The other teams ask questions and vote on who really wrote it.",
+    summary: "A team bluffing game. Everyone writes a true story about themselves. Each round, one story is pulled from a team's pile and the whole team claims it's theirs. The other teams ask questions and vote on who really wrote it.",
     sections: [
       {
         title: 'Setup',
@@ -35,18 +35,20 @@ export const GAME_RULES: Record<string, GameRulesData> = {
       {
         title: 'Each Round',
         items: [
-          { bullet: '📜', text: 'A story is pulled from one team\'s pile and read aloud.' },
-          { bullet: '🎭', text: 'Everyone on that team claims "that\'s my story!" — but only one is telling the truth.' },
-          { bullet: '❓', text: 'Other teams ask questions out loud (on your phones you just see the story and a timer).' },
-          { bullet: '🗳️', text: 'Everyone votes on who they think the real author is.' },
+          { bullet: '📜', text: 'A story is pulled from one team\'s pile. Teams take turns being the bluffers.' },
+          { bullet: '🎭', text: 'Everyone on that team claims "that\'s my story!" Only one of them is telling the truth.' },
+          { bullet: '❓', text: 'The other teams ask questions out loud. Phones show the story, the suspects and the clock.' },
+          { bullet: '⏱️', text: 'Timed rounds go to the vote when the clock runs out. In free flow, a guesser or the host starts the vote.' },
+          { bullet: '🗳️', text: 'The guessers vote for the real author. Votes are final.' },
         ],
-        example: 'Story: "I once got stuck in a elevator for 3 hours." Team Red all claim it\'s theirs. You ask questions like "What floor were you on?" and watch who hesitates.',
+        example: 'Story: "I once got stuck in an elevator for 3 hours." Team Red all claim it\'s theirs. You ask questions like "What floor were you on?" and watch who hesitates.',
       },
       {
         title: 'Scoring',
         items: [
-          { bullet: '✓', text: 'Majority guesses correctly → guessing teams get 5 points.' },
-          { bullet: '✗', text: 'Majority guesses wrong → bluffing team gets 5 points.' },
+          { bullet: '✓', text: 'Majority of guessers right → each guessing team gets 5 points.' },
+          { bullet: '✗', text: 'Majority wrong, or a tie → the bluffing team gets 5 points.' },
+          { bullet: '✍️', text: 'Once your story is used, you write a new one before your team bluffs again.' },
         ],
       },
     ],
@@ -67,8 +69,9 @@ export const GAME_RULES: Record<string, GameRulesData> = {
         items: [
           { bullet: '🎲', text: 'Shake your phone (or tap) to roll 5 dice. Only you can see yours.' },
           { bullet: '📢', text: 'Take turns making bids: "I think there are at least X dice showing Y across everyone."' },
-          { bullet: '⬆️', text: 'Each bid must be higher than the last (raise the quantity or the face value).' },
+          { bullet: '⬆️', text: 'Each bid must go up: more dice, or the same number of dice with a higher face.' },
           { bullet: '🚨', text: 'If you think someone is lying, call "LIAR!" All dice are revealed.' },
+          { bullet: '⏱️', text: 'Out of time? Your turn is played for you: you open with one die of the face you hold most, or LIAR is called on the last bid.' },
         ],
         example: 'There are 3 players with 5 dice each (15 total). You bid "four 3s" meaning you think there are at least four dice showing 3 across all 15 dice. Next player must bid higher — like "five 3s" or "four 5s."',
       },
@@ -77,21 +80,23 @@ export const GAME_RULES: Record<string, GameRulesData> = {
         items: [
           { bullet: '✓', text: 'Bid was wrong (fewer dice than claimed) → bidder loses a ❤️' },
           { bullet: '✗', text: 'Bid was actually correct → caller loses a ❤️' },
+          { bullet: '🔁', text: 'Whoever lost the ❤️ starts the next round (after a correct Spot On, the caller does).' },
           { bullet: '💀', text: 'Lose all your hearts → you\'re eliminated. Last one standing wins.' },
         ],
       },
       {
         title: 'Optional Rules',
         items: [
-          { bullet: '⚀', text: 'Wild 1s: Dice showing 1 count as ANY number (makes bids more likely to be true).' },
+          { bullet: '★', text: 'Wild 1s: every 1 also counts as the face being bid (bids on 1s count only the 1s).' },
           { bullet: '🎯', text: 'Spot On: Call "exact" if you think the bid is exactly right. Correct = everyone else loses a ❤️. Wrong = you lose one.' },
         ],
       },
     ],
     tips: [
       'Start with what you can see. If you have two 4s, bidding "three 4s" is pretty safe.',
-      'Watch how confident people are — hesitation often means a bluff.',
-      'Higher numbers are statistically less common. A bid of "six 6s" is risky.',
+      'Every face is equally likely. Expect about 1 in 6 hidden dice to match a bid (1 in 3 with wild 1s).',
+      'The bid and call buttons show the odds from your own dice. Use them to judge a bluff.',
+      'Watch how confident people are. Hesitation often means a bluff.',
     ],
   },
 
@@ -104,16 +109,24 @@ export const GAME_RULES: Record<string, GameRulesData> = {
         title: 'Setup',
         items: [
           { bullet: '🚢', text: 'Place 4 ships on your grid: Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).' },
-          { bullet: '📐', text: 'Tap a cell to place, toggle horizontal/vertical. Or tap "Auto" for random placement.' },
+          { bullet: '📐', text: 'Pick a ship, then tap the board. Tap a placed ship to move it, tap it again to turn it. Shuffle deals a random layout you can still change.' },
           { bullet: '👀', text: 'Everyone places at the same time. Nobody can see your grid.' },
+          { bullet: '⏱️', text: 'When the placement clock runs out, anything you haven\'t placed is placed for you.' },
         ],
       },
       {
         title: 'Battle',
         items: [
-          { bullet: '🎯', text: 'On your turn, tap cells on an opponent\'s grid to fire shots.' },
+          { bullet: '🎯', text: 'On your turn, tap squares on an opponent\'s grid to fire. Tap a player at the top to switch targets.' },
           { bullet: '💥', text: 'Hit = orange fire. Miss = gray dot. Sink all cells of a ship = it\'s destroyed.' },
           { bullet: '⚓', text: 'Sink all 4 of someone\'s ships → they\'re eliminated.' },
+          { bullet: '⏱️', text: 'Out of time? Your remaining shots fire at random.' },
+        ],
+      },
+      {
+        title: 'Sonar Ping (optional)',
+        items: [
+          { bullet: '📡', text: 'Once per game, scan a 2×2 area of an opponent\'s grid. You learn whether a ship is there, not where. Only you see the answer.' },
         ],
       },
       {

@@ -1,50 +1,129 @@
 import type { Room } from '@/types/hub';
 import type {
-  LiarsDiceServerState,
-  LiarsDiceClientState,
-  LiarsDiceSettings,
-  LiarsDicePlayerInfo,
   ChallengeResult,
-  BidHistoryEntry,
+  LiarsDiceClientState,
+  LiarsDicePlayerInfo,
+  LiarsDiceServerState,
+  LiarsDiceSettings,
+  LiarsDiceStats,
+  LiarsDiceTurnTimer,
 } from '@/types/games/liars-dice';
-import { DEFAULT_LIARS_DICE_SETTINGS } from '@/types/games/liars-dice';
+import {
+  DEFAULT_LIARS_DICE_SETTINGS,
+  DICE_PER_PLAYER,
+  LIARS_DICE_MAX_PLAYERS,
+  countMatches,
+  isValidRaise,
+} from '@/types/games/liars-dice';
 
 // ---- In-memory game store ----
 const games = new Map<string, LiarsDiceServerState>();
-const activeTimers = new Map<string, ReturnType<typeof setInterval>>();
+const turnTimers = new Map<string, ReturnType<typeof setInterval>>();
+const phaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-// ---- Public API ----
+const TURN_TIMER_OPTIONS = [15, 30, 45, 0] as const;
+
+/** Never trust settings from the client: clamp everything to the allowed options. */
+function sanitizeSettings(input?: Partial<LiarsDiceSettings>): LiarsDiceSettings {
+  const s = { ...DEFAULT_LIARS_DICE_SETTINGS, ...input };
+  return {
+    maxPlayers: Math.min(LIARS_DICE_MAX_PLAYERS, Math.max(2, Math.floor(Number(s.maxPlayers)) || LIARS_DICE_MAX_PLAYERS)),
+    lives: s.lives === 3 ? 3 : 2,
+    wildOnes: s.wildOnes === true,
+    spotOn: s.spotOn === true,
+    turnTimer: (TURN_TIMER_OPTIONS as readonly number[]).includes(s.turnTimer)
+      ? s.turnTimer
+      : DEFAULT_LIARS_DICE_SETTINGS.turnTimer,
+  };
+}
+
+function emptyStats(): LiarsDiceStats {
+  return { calls: 0, correctCalls: 0, caught: 0, spotOnHits: 0 };
+}
+
+function statsFor(state: LiarsDiceServerState, id: string): LiarsDiceStats {
+  if (!state.stats[id]) state.stats[id] = emptyStats();
+  return state.stats[id];
+}
+
+function rollDice(): number[] {
+  return Array.from({ length: DICE_PER_PLAYER }, () => Math.floor(Math.random() * 6) + 1);
+}
+
+function shuffleArray<T>(arr: T[]): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function aliveIds(state: LiarsDiceServerState): string[] {
+  return state.seatingOrder.filter(id => state.playerData[id]?.alive);
+}
+
+/** Next alive player clockwise from a seat (the seat's owner may be out already). */
+function nextAliveAfter(state: LiarsDiceServerState, id: string): string | null {
+  const n = state.seatingOrder.length;
+  const start = state.seatingOrder.indexOf(id);
+  for (let step = 1; step <= n; step++) {
+    const candidate = state.seatingOrder[(Math.max(start, 0) + step) % n];
+    if (state.playerData[candidate]?.alive) return candidate;
+  }
+  return null;
+}
+
+/** The player on a seat if they're alive, otherwise the next alive player clockwise. */
+function aliveFrom(state: LiarsDiceServerState, id: string): string | null {
+  return state.playerData[id]?.alive ? id : nextAliveAfter(state, id);
+}
+
+function totalDice(state: LiarsDiceServerState): number {
+  return state.roundPlayers.reduce((sum, id) => sum + (state.playerData[id]?.dice.length ?? 0), 0);
+}
+
+function playerName(state: LiarsDiceServerState, room: Room, id: string): string {
+  return room.players[id]?.name || state.playerData[id]?.name || 'Unknown';
+}
+
+function playerAvatar(state: LiarsDiceServerState, room: Room, id: string): string {
+  return room.players[id]?.avatar || state.playerData[id]?.avatar || '🎲';
+}
+
+// ---- Lifecycle ----
 
 export function createGame(room: Room, settings?: Partial<LiarsDiceSettings>): LiarsDiceServerState {
-  const mergedSettings: LiarsDiceSettings = { ...DEFAULT_LIARS_DICE_SETTINGS, ...settings };
+  clearTimers(room.code);
+  const merged = sanitizeSettings(settings);
 
-  // Build seating order from connected players (shuffled)
   const playerIds = Object.keys(room.players).filter(id => room.players[id].connected);
   shuffleArray(playerIds);
 
   const playerData: LiarsDiceServerState['playerData'] = {};
+  const stats: Record<string, LiarsDiceStats> = {};
   for (const id of playerIds) {
-    playerData[id] = {
-      dice: rollDiceForPlayer(),
-      lives: mergedSettings.lives,
-      alive: true,
-    };
+    const rp = room.players[id];
+    playerData[id] = { name: rp.name, avatar: rp.avatar, dice: rollDice(), lives: merged.lives, alive: true, left: false };
+    stats[id] = emptyStats();
   }
 
   const state: LiarsDiceServerState = {
     phase: 'rolling',
     playerData,
     seatingOrder: [...playerIds],
-    aliveOrder: [...playerIds],
-    currentPlayerIndex: 0,
+    roundPlayers: [...playerIds],
+    activePlayerId: playerIds[0] ?? null,
     currentBid: null,
     bidHistory: [],
     roundNumber: 1,
-    settings: mergedSettings,
+    settings: merged,
     eliminationOrder: [],
-    turnTimerEnd: null,
     challengeResult: null,
     rollsReceived: new Set(),
+    stats,
+    winnerId: null,
+    turnTimerEnd: null,
+    turnTimerTotal: 0,
+    turnTimerPlayerId: null,
   };
 
   games.set(room.code, state);
@@ -52,20 +131,32 @@ export function createGame(room: Room, settings?: Partial<LiarsDiceSettings>): L
   return state;
 }
 
+export function getGameState(roomCode: string): LiarsDiceServerState | undefined {
+  return games.get(roomCode);
+}
+
+export function endGame(roomCode: string): void {
+  clearTimers(roomCode);
+  games.delete(roomCode);
+  console.log(`[LiarsDice] Game ended in ${roomCode}`);
+}
+
+// ---- Rolling ----
+
 export function markRollComplete(roomCode: string, playerId: string): boolean {
   const state = games.get(roomCode);
-  if (!state || state.phase !== 'rolling') return false;
-
+  if (!state || state.phase !== 'rolling' || !state.playerData[playerId]?.alive) return false;
+  if (state.rollsReceived.has(playerId)) return false;
   state.rollsReceived.add(playerId);
   return true;
 }
 
+/** Every connected player still in has rolled (offline players don't hold the table up). */
 export function allRollsComplete(roomCode: string, room: Room): boolean {
   const state = games.get(roomCode);
-  if (!state) return false;
-
-  const connectedAlive = state.aliveOrder.filter(id => room.players[id]?.connected);
-  return connectedAlive.every(id => state.rollsReceived.has(id));
+  if (!state || state.phase !== 'rolling') return false;
+  const connected = aliveIds(state).filter(id => room.players[id]?.connected);
+  return connected.length > 0 && connected.every(id => state.rollsReceived.has(id));
 }
 
 export function startBidding(roomCode: string): boolean {
@@ -76,514 +167,345 @@ export function startBidding(roomCode: string): boolean {
   state.currentBid = null;
   state.bidHistory = [];
   state.challengeResult = null;
+  // The starter may have left while everyone was rolling
+  state.activePlayerId = state.activePlayerId ? aliveFrom(state, state.activePlayerId) : aliveIds(state)[0] ?? null;
   return true;
 }
+
+// ---- Bidding ----
 
 export function placeBid(
   roomCode: string,
   playerId: string,
   quantity: number,
   faceValue: number,
-  room: Room
+  room: Room,
+  auto = false,
 ): { success: boolean; error?: string } {
   const state = games.get(roomCode);
   if (!state || state.phase !== 'bidding') return { success: false, error: 'Not in bidding phase' };
+  if (state.activePlayerId !== playerId) return { success: false, error: 'Not your turn' };
+  if (!state.playerData[playerId]?.alive) return { success: false, error: 'You are out of this game' };
 
-  // Verify it's this player's turn
-  if (state.aliveOrder[state.currentPlayerIndex] !== playerId) {
-    return { success: false, error: 'Not your turn' };
-  }
-
-  // Verify player is alive
-  if (!state.playerData[playerId]?.alive) {
-    return { success: false, error: 'Player is eliminated' };
-  }
-
-  // Validate face value
-  if (faceValue < 1 || faceValue > 6 || !Number.isInteger(faceValue)) {
+  if (!Number.isInteger(faceValue) || faceValue < 1 || faceValue > 6) {
     return { success: false, error: 'Invalid face value' };
   }
-
-  // Validate quantity
-  const totalDice = state.aliveOrder.reduce((sum, id) => sum + state.playerData[id].dice.length, 0);
-  if (quantity < 1 || quantity > totalDice || !Number.isInteger(quantity)) {
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > totalDice(state)) {
     return { success: false, error: 'Invalid quantity' };
   }
-
-  // Validate raise: must be higher than current bid
-  if (state.currentBid) {
-    const validRaise = isValidRaise(state.currentBid.quantity, state.currentBid.faceValue, quantity, faceValue);
-    if (!validRaise) {
-      return { success: false, error: 'Bid must be higher than current bid' };
-    }
+  if (!isValidRaise(state.currentBid, { quantity, faceValue })) {
+    return { success: false, error: 'Bid must be higher than the current bid' };
   }
 
-  const player = room.players[playerId];
-  const entry: BidHistoryEntry = {
+  state.bidHistory.push({
     playerId,
-    playerName: player?.name || 'Unknown',
-    playerAvatar: player?.avatar || '🎲',
+    playerName: playerName(state, room, playerId),
+    playerAvatar: playerAvatar(state, room, playerId),
     quantity,
     faceValue,
     type: 'bid',
-  };
-
+    ...(auto ? { auto: true } : {}),
+  });
   state.currentBid = { quantity, faceValue, playerId };
-  state.bidHistory.push(entry);
-
-  // Advance to next player
-  advanceTurn(state);
-
+  state.activePlayerId = nextAliveAfter(state, playerId);
   return { success: true };
 }
 
-export function callLiar(
+/**
+ * LIAR: the bid is wrong → the bidder loses a life, otherwise the caller does.
+ * SPOT ON: exactly right → everyone else loses a life, otherwise the caller does.
+ */
+export function challenge(
   roomCode: string,
   playerId: string,
-  room: Room
+  type: 'liar' | 'spotOn',
+  room: Room,
+  auto = false,
 ): ChallengeResult | { error: string } {
   const state = games.get(roomCode);
   if (!state || state.phase !== 'bidding') return { error: 'Not in bidding phase' };
+  if (type === 'spotOn' && !state.settings.spotOn) return { error: 'Spot On is not enabled' };
+  if (state.activePlayerId !== playerId) return { error: 'Not your turn' };
+  const bid = state.currentBid;
+  if (!bid) return { error: 'There is no bid to challenge yet' };
 
-  if (state.aliveOrder[state.currentPlayerIndex] !== playerId) {
-    return { error: 'Not your turn' };
-  }
-
-  if (!state.currentBid) {
-    return { error: 'No bid to challenge' };
-  }
-
-  const caller = room.players[playerId];
-  const bidder = room.players[state.currentBid.playerId];
-
-  // Add to bid history
   state.bidHistory.push({
     playerId,
-    playerName: caller?.name || 'Unknown',
-    playerAvatar: caller?.avatar || '🎲',
-    quantity: state.currentBid.quantity,
-    faceValue: state.currentBid.faceValue,
-    type: 'liar',
+    playerName: playerName(state, room, playerId),
+    playerAvatar: playerAvatar(state, room, playerId),
+    quantity: bid.quantity,
+    faceValue: bid.faceValue,
+    type,
+    ...(auto ? { auto: true } : {}),
   });
 
-  // Count actual dice
-  const actualCount = countDice(state, state.currentBid.faceValue);
+  const allDice: Record<string, number[]> = {};
+  for (const id of state.roundPlayers) allDice[id] = [...(state.playerData[id]?.dice ?? [])];
+  const actualCount = Object.values(allDice).reduce((sum, dice) => sum + countMatches(dice, bid.faceValue, state.settings.wildOnes), 0);
 
-  // Bid is correct if actual >= bid quantity
-  const bidCorrect = actualCount >= state.currentBid.quantity;
-
-  // If bid correct, challenger loses. If bid wrong, bidder loses.
-  const loserId = bidCorrect ? playerId : state.currentBid.playerId;
+  let wasCorrect: boolean;
+  let loserIds: string[];
+  if (type === 'liar') {
+    const bidTrue = actualCount >= bid.quantity;
+    wasCorrect = !bidTrue;
+    loserIds = [bidTrue ? playerId : bid.playerId];
+    if (!bidTrue) statsFor(state, bid.playerId).caught++;
+  } else {
+    wasCorrect = actualCount === bid.quantity;
+    loserIds = wasCorrect ? aliveIds(state).filter(id => id !== playerId) : [playerId];
+    if (wasCorrect) statsFor(state, playerId).spotOnHits++;
+  }
+  const s = statsFor(state, playerId);
+  s.calls++;
+  if (wasCorrect) s.correctCalls++;
 
   const result: ChallengeResult = {
-    type: 'liar',
+    type,
     callerId: playerId,
-    callerName: caller?.name || 'Unknown',
-    bidderId: state.currentBid.playerId,
-    bidderName: bidder?.name || 'Unknown',
-    bid: { quantity: state.currentBid.quantity, faceValue: state.currentBid.faceValue },
+    callerName: playerName(state, room, playerId),
+    bidderId: bid.playerId,
+    bidderName: playerName(state, room, bid.playerId),
+    bid: { quantity: bid.quantity, faceValue: bid.faceValue },
     actualCount,
-    allDice: getAllDice(state),
-    loserId,
-    loserName: room.players[loserId]?.name || 'Unknown',
-    losersIfSpotOn: null,
-    wasCorrect: !bidCorrect, // challenge was correct if bid was wrong
+    allDice,
+    loserIds,
+    wasCorrect,
+    auto,
   };
 
   state.challengeResult = result;
   state.phase = 'challenge';
-
+  state.activePlayerId = null;
   return result;
 }
 
-export function callSpotOn(
-  roomCode: string,
-  playerId: string,
-  room: Room
-): ChallengeResult | { error: string } {
+/**
+ * The turn timer ran out, or the player is away: play the turn for them.
+ * Opening bid → one of the face they hold most (always true). Otherwise → LIAR.
+ */
+export function autoPlay(roomCode: string, room: Room): boolean {
   const state = games.get(roomCode);
-  if (!state || state.phase !== 'bidding') return { error: 'Not in bidding phase' };
-
-  if (!state.settings.spotOn) return { error: 'Spot On is not enabled' };
-
-  if (state.aliveOrder[state.currentPlayerIndex] !== playerId) {
-    return { error: 'Not your turn' };
-  }
+  if (!state || state.phase !== 'bidding' || !state.activePlayerId) return false;
+  const activeId = state.activePlayerId;
 
   if (!state.currentBid) {
-    return { error: 'No bid to call spot on' };
+    const dice = state.playerData[activeId]?.dice ?? [];
+    let face = 6;
+    let best = -1;
+    for (let f = 6; f >= 1; f--) {
+      const n = countMatches(dice, f, state.settings.wildOnes);
+      if (n > best) {
+        best = n;
+        face = f;
+      }
+    }
+    return placeBid(roomCode, activeId, 1, face, room, true).success;
   }
 
-  const caller = room.players[playerId];
-  const bidder = room.players[state.currentBid.playerId];
-
-  // Add to bid history
-  state.bidHistory.push({
-    playerId,
-    playerName: caller?.name || 'Unknown',
-    playerAvatar: caller?.avatar || '🎲',
-    quantity: state.currentBid.quantity,
-    faceValue: state.currentBid.faceValue,
-    type: 'spotOn',
-  });
-
-  const actualCount = countDice(state, state.currentBid.faceValue);
-  const isExact = actualCount === state.currentBid.quantity;
-
-  let loserId: string;
-  let losersIfSpotOn: string[] | null = null;
-
-  if (isExact) {
-    // Caller is correct — all OTHER alive players lose a life
-    losersIfSpotOn = state.aliveOrder.filter(id => id !== playerId);
-    loserId = ''; // no single loser
-  } else {
-    // Caller is wrong — they lose a life
-    loserId = playerId;
-  }
-
-  const result: ChallengeResult = {
-    type: 'spotOn',
-    callerId: playerId,
-    callerName: caller?.name || 'Unknown',
-    bidderId: state.currentBid.playerId,
-    bidderName: bidder?.name || 'Unknown',
-    bid: { quantity: state.currentBid.quantity, faceValue: state.currentBid.faceValue },
-    actualCount,
-    allDice: getAllDice(state),
-    loserId,
-    loserName: loserId ? (room.players[loserId]?.name || 'Unknown') : '',
-    losersIfSpotOn,
-    wasCorrect: isExact,
-  };
-
-  state.challengeResult = result;
-  state.phase = 'challenge';
-
-  return result;
+  return !('error' in challenge(roomCode, activeId, 'liar', room, true));
 }
 
-/**
- * Apply the challenge result: remove lives, check eliminations.
- * Called after the reveal animation delay.
- */
-export function applyChallenge(roomCode: string, room: Room): { eliminated: string[]; gameOver: boolean } {
+/** Take lives after the reveal. Returns true if anything changed. */
+export function applyChallenge(roomCode: string): boolean {
   const state = games.get(roomCode);
-  if (!state || !state.challengeResult) return { eliminated: [], gameOver: false };
+  if (!state || state.phase !== 'challenge' || !state.challengeResult) return false;
 
-  const eliminated: string[] = [];
-  const result = state.challengeResult;
-
-  if (result.losersIfSpotOn && result.losersIfSpotOn.length > 0) {
-    // Spot On correct — all others lose a life
-    for (const id of result.losersIfSpotOn) {
-      const pd = state.playerData[id];
-      if (pd && pd.alive) {
-        pd.lives--;
-        if (pd.lives <= 0) {
-          pd.alive = false;
-          state.eliminationOrder.push(id);
-          eliminated.push(id);
-        }
-      }
-    }
-  } else if (result.loserId) {
-    // Single loser
-    const pd = state.playerData[result.loserId];
-    if (pd) {
-      pd.lives--;
-      if (pd.lives <= 0) {
-        pd.alive = false;
-        state.eliminationOrder.push(result.loserId);
-        eliminated.push(result.loserId);
-      }
+  for (const id of state.challengeResult.loserIds) {
+    const pd = state.playerData[id];
+    if (!pd || !pd.alive) continue;
+    pd.lives = Math.max(0, pd.lives - 1);
+    if (pd.lives === 0) {
+      pd.alive = false;
+      if (!state.eliminationOrder.includes(id)) state.eliminationOrder.push(id);
     }
   }
 
-  // Update alive order
-  state.aliveOrder = state.seatingOrder.filter(id => state.playerData[id]?.alive);
-
-  // Check game over
-  const gameOver = state.aliveOrder.length <= 1;
-  if (gameOver) {
-    state.phase = 'finished';
-  } else {
-    state.phase = 'roundEnd';
-  }
-
-  return { eliminated, gameOver };
-}
-
-/**
- * Start a new round: re-roll dice, set starting player (loser of last round).
- */
-export function startNewRound(roomCode: string, room: Room): boolean {
-  const state = games.get(roomCode);
-  if (!state || (state.phase !== 'roundEnd')) return false;
-
-  state.roundNumber++;
-  state.currentBid = null;
-  state.bidHistory = [];
-  state.rollsReceived = new Set();
-
-  // Re-roll dice for all alive players
-  for (const id of state.aliveOrder) {
-    state.playerData[id].dice = rollDiceForPlayer();
-  }
-
-  // Loser of last round starts (if still alive), otherwise next alive player
-  const lastResult = state.challengeResult;
-  if (lastResult) {
-    let starterId: string | null = null;
-
-    if (lastResult.type === 'spotOn' && lastResult.wasCorrect && lastResult.losersIfSpotOn) {
-      // Spot-on correct: multiple losers. Pick the first alive loser in seating order.
-      starterId = state.aliveOrder.find(id => lastResult.losersIfSpotOn!.includes(id)) || null;
-    } else {
-      // Normal liar call or spot-on wrong: single loser starts
-      starterId = lastResult.loserId || null;
-    }
-
-    if (starterId) {
-      const starterIndex = state.aliveOrder.indexOf(starterId);
-      if (starterIndex !== -1) {
-        state.currentPlayerIndex = starterIndex;
-      } else {
-        state.currentPlayerIndex = 0;
-      }
-    } else {
-      state.currentPlayerIndex = 0;
-    }
-  }
-
-  state.challengeResult = null;
-  state.phase = 'rolling';
-
+  finishIfOver(state);
+  if (state.phase === 'challenge') state.phase = 'roundEnd';
   return true;
 }
 
-export function getClientState(
-  roomCode: string,
-  playerId: string,
-  room: Room
-): LiarsDiceClientState | null {
+/** Re-roll for everyone still in. The round's loser opens (or whoever sits next, if they're out). */
+export function startNewRound(roomCode: string): boolean {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'roundEnd') return false;
+
+  const last = state.challengeResult;
+  let starter: string | null = null;
+  if (last) {
+    // A correct SPOT ON hurts everyone else: the caller opens the next round
+    const seat = last.type === 'spotOn' && last.wasCorrect ? last.callerId : last.loserIds[0];
+    starter = seat ? aliveFrom(state, seat) : null;
+  }
+
+  state.roundNumber++;
+  state.roundPlayers = aliveIds(state);
+  for (const id of state.roundPlayers) state.playerData[id].dice = rollDice();
+  state.activePlayerId = starter ?? state.roundPlayers[0] ?? null;
+  state.currentBid = null;
+  state.bidHistory = [];
+  state.challengeResult = null;
+  state.rollsReceived = new Set();
+  state.phase = 'rolling';
+  return true;
+}
+
+function finishIfOver(state: LiarsDiceServerState): void {
+  const alive = aliveIds(state);
+  if (alive.length <= 1) {
+    state.phase = 'finished';
+    state.winnerId = alive[0] ?? null;
+    state.activePlayerId = null;
+  }
+}
+
+/**
+ * A player left the room for good. They're out of the game. Their dice stay on the
+ * table until the round ends (bids were made against them). Returns true if the game changed.
+ */
+export function removePlayer(roomCode: string, playerId: string): boolean {
+  const state = games.get(roomCode);
+  const pd = state?.playerData[playerId];
+  if (!state || !pd || pd.left || state.phase === 'finished') return false;
+
+  pd.left = true;
+  if (pd.alive) {
+    pd.alive = false;
+    pd.lives = 0;
+    if (!state.eliminationOrder.includes(playerId)) state.eliminationOrder.push(playerId);
+  }
+  state.rollsReceived.delete(playerId);
+  if (state.activePlayerId === playerId) state.activePlayerId = nextAliveAfter(state, playerId);
+  finishIfOver(state);
+  return true;
+}
+
+// ---- Client view ----
+
+export function getClientState(roomCode: string, playerId: string, room: Room): LiarsDiceClientState | null {
   const state = games.get(roomCode);
   if (!state) return null;
-
-  const isRevealPhase = state.phase === 'challenge' || state.phase === 'reveal';
 
   const players: LiarsDicePlayerInfo[] = state.seatingOrder.map(id => {
     const pd = state.playerData[id];
     const rp = room.players[id];
     return {
       id,
-      name: rp?.name || 'Unknown',
-      avatar: rp?.avatar || '🎲',
-      lives: pd?.lives || 0,
+      name: playerName(state, room, id),
+      avatar: playerAvatar(state, room, id),
+      lives: pd?.lives ?? 0,
       maxLives: state.settings.lives,
-      alive: pd?.alive || false,
-      connected: rp?.connected || false,
-      diceCount: pd?.dice.length || 0,
-      dice: isRevealPhase ? (pd?.dice || null) : null,
+      alive: pd?.alive ?? false,
+      connected: rp?.connected ?? false,
+      rolled: state.rollsReceived.has(id),
+      left: pd?.left ?? true,
     };
   });
 
-  const myData = state.playerData[playerId];
-  const activePlayerId = state.aliveOrder[state.currentPlayerIndex] || null;
-
-  const currentBid = state.currentBid
-    ? {
-        quantity: state.currentBid.quantity,
-        faceValue: state.currentBid.faceValue,
-        playerName: room.players[state.currentBid.playerId]?.name || 'Unknown',
-        playerId: state.currentBid.playerId,
-      }
-    : null;
-
-  const totalDiceOnTable = state.aliveOrder.reduce(
-    (sum, id) => sum + (state.playerData[id]?.dice.length || 0),
-    0
-  );
+  const bid = state.currentBid;
+  const inRound = state.roundPlayers.includes(playerId);
 
   return {
     phase: state.phase,
     players,
-    myDice: myData?.dice || [],
-    currentBid,
-    activePlayerId,
-    isMyTurn: activePlayerId === playerId && state.phase === 'bidding',
+    myDice: inRound ? [...(state.playerData[playerId]?.dice ?? [])] : [],
+    currentBid: bid ? { ...bid, playerName: playerName(state, room, bid.playerId) } : null,
+    activePlayerId: state.activePlayerId,
+    isMyTurn: state.phase === 'bidding' && state.activePlayerId === playerId,
     bidHistory: state.bidHistory,
     roundNumber: state.roundNumber,
     lastChallengeResult: state.challengeResult,
     settings: state.settings,
-    eliminationOrder: state.eliminationOrder.map(id => ({
-      id,
-      name: room.players[id]?.name || 'Unknown',
-      avatar: room.players[id]?.avatar || '🎲',
-    })),
-    totalDiceOnTable,
-    isFirstRound: state.roundNumber === 1,
+    eliminationOrder: [...state.eliminationOrder],
+    totalDiceOnTable: totalDice(state),
+    stats: { ...state.stats },
+    winnerId: state.winnerId,
   };
 }
 
-export function getGameState(roomCode: string): LiarsDiceServerState | undefined {
-  return games.get(roomCode);
+export function getTurnTimerSnapshot(roomCode: string): LiarsDiceTurnTimer | null {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'bidding' || !state.turnTimerEnd || !state.turnTimerPlayerId) return null;
+  return {
+    playerId: state.turnTimerPlayerId,
+    secondsLeft: Math.max(0, Math.ceil((state.turnTimerEnd - Date.now()) / 1000)),
+    total: state.turnTimerTotal,
+  };
 }
+
+// ---- Reconnection ----
 
 export function swapPlayerId(roomCode: string, oldId: string, newId: string): void {
   const state = games.get(roomCode);
   if (!state) return;
 
-  // Swap in playerData
+  const swap = (id: string) => (id === oldId ? newId : id);
+
   if (state.playerData[oldId]) {
     state.playerData[newId] = state.playerData[oldId];
     delete state.playerData[oldId];
   }
-
-  // Swap in seatingOrder
-  const seatIdx = state.seatingOrder.indexOf(oldId);
-  if (seatIdx !== -1) state.seatingOrder[seatIdx] = newId;
-
-  // Swap in aliveOrder
-  const aliveIdx = state.aliveOrder.indexOf(oldId);
-  if (aliveIdx !== -1) state.aliveOrder[aliveIdx] = newId;
-
-  // Swap in eliminationOrder
-  const elimIdx = state.eliminationOrder.indexOf(oldId);
-  if (elimIdx !== -1) state.eliminationOrder[elimIdx] = newId;
-
-  // Swap in currentBid
-  if (state.currentBid?.playerId === oldId) {
-    state.currentBid.playerId = newId;
+  if (state.stats[oldId]) {
+    state.stats[newId] = state.stats[oldId];
+    delete state.stats[oldId];
   }
+  state.seatingOrder = state.seatingOrder.map(swap);
+  state.roundPlayers = state.roundPlayers.map(swap);
+  state.eliminationOrder = state.eliminationOrder.map(swap);
+  if (state.activePlayerId) state.activePlayerId = swap(state.activePlayerId);
+  if (state.turnTimerPlayerId) state.turnTimerPlayerId = swap(state.turnTimerPlayerId);
+  if (state.winnerId) state.winnerId = swap(state.winnerId);
+  if (state.currentBid) state.currentBid.playerId = swap(state.currentBid.playerId);
+  for (const entry of state.bidHistory) entry.playerId = swap(entry.playerId);
+  if (state.rollsReceived.delete(oldId)) state.rollsReceived.add(newId);
 
-  // Swap in bidHistory
-  for (const entry of state.bidHistory) {
-    if (entry.playerId === oldId) entry.playerId = newId;
-  }
-
-  // Swap in challengeResult
-  if (state.challengeResult) {
-    const cr = state.challengeResult;
-    if (cr.callerId === oldId) cr.callerId = newId;
-    if (cr.bidderId === oldId) cr.bidderId = newId;
-    if (cr.loserId === oldId) cr.loserId = newId;
+  const cr = state.challengeResult;
+  if (cr) {
+    cr.callerId = swap(cr.callerId);
+    cr.bidderId = swap(cr.bidderId);
+    cr.loserIds = cr.loserIds.map(swap);
     if (cr.allDice[oldId]) {
       cr.allDice[newId] = cr.allDice[oldId];
       delete cr.allDice[oldId];
     }
-    if (cr.losersIfSpotOn) {
-      const spotIdx = cr.losersIfSpotOn.indexOf(oldId);
-      if (spotIdx !== -1) cr.losersIfSpotOn[spotIdx] = newId;
-    }
-  }
-
-  // Swap in rollsReceived
-  if (state.rollsReceived.has(oldId)) {
-    state.rollsReceived.delete(oldId);
-    state.rollsReceived.add(newId);
   }
 
   console.log(`[LiarsDice] Swapped player ID ${oldId} → ${newId}`);
 }
 
-export function endGame(roomCode: string): void {
-  clearRoomTimer(roomCode);
-  games.delete(roomCode);
-  console.log(`[LiarsDice] Game ended in ${roomCode}`);
+// ---- Timers (one turn clock + one phase step per room) ----
+
+export function setTurnTimer(roomCode: string, interval: ReturnType<typeof setInterval>): void {
+  clearTurnTimer(roomCode);
+  turnTimers.set(roomCode, interval);
 }
 
-export function setRoomTimer(roomCode: string, interval: ReturnType<typeof setInterval>): void {
-  clearRoomTimer(roomCode);
-  activeTimers.set(roomCode, interval);
-}
-
-export function clearRoomTimer(roomCode: string): void {
-  const existing = activeTimers.get(roomCode);
-  if (existing) {
-    clearInterval(existing);
-    activeTimers.delete(roomCode);
+export function clearTurnTimer(roomCode: string): void {
+  const t = turnTimers.get(roomCode);
+  if (t) {
+    clearInterval(t);
+    turnTimers.delete(roomCode);
   }
 }
 
-/**
- * Handle disconnected player's turn: auto-call liar.
- */
-export function handleDisconnectedTurn(roomCode: string, room: Room): ChallengeResult | null {
-  const state = games.get(roomCode);
-  if (!state || state.phase !== 'bidding') return null;
-
-  const activeId = state.aliveOrder[state.currentPlayerIndex];
-  if (!activeId) return null;
-
-  const player = room.players[activeId];
-  if (!player || player.connected) return null;
-
-  // If no bid yet, skip to next player
-  if (!state.currentBid) {
-    advanceTurn(state);
-    return null;
-  }
-
-  // Auto-call liar
-  const result = callLiar(roomCode, activeId, room);
-  if ('error' in result) return null;
-  return result;
+export function hasTurnTimer(roomCode: string): boolean {
+  return turnTimers.has(roomCode);
 }
 
-export function getPlayerDice(roomCode: string, playerId: string): number[] | null {
-  const state = games.get(roomCode);
-  if (!state) return null;
-  return state.playerData[playerId]?.dice || null;
+export function setPhaseTimer(roomCode: string, timeout: ReturnType<typeof setTimeout>): void {
+  clearPhaseTimer(roomCode);
+  phaseTimers.set(roomCode, timeout);
 }
 
-// ---- Internal helpers ----
-
-function rollDiceForPlayer(): number[] {
-  return Array.from({ length: 5 }, () => Math.floor(Math.random() * 6) + 1);
-}
-
-function shuffleArray<T>(arr: T[]): void {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+export function clearPhaseTimer(roomCode: string): void {
+  const t = phaseTimers.get(roomCode);
+  if (t) {
+    clearTimeout(t);
+    phaseTimers.delete(roomCode);
   }
 }
 
-function isValidRaise(
-  prevQuantity: number,
-  prevFace: number,
-  newQuantity: number,
-  newFace: number
-): boolean {
-  // Higher quantity allows any face value
-  if (newQuantity > prevQuantity) return true;
-  // Same quantity requires higher face value
-  if (newQuantity === prevQuantity && newFace > prevFace) return true;
-  return false;
-}
-
-function countDice(state: LiarsDiceServerState, faceValue: number): number {
-  let count = 0;
-  for (const id of state.aliveOrder) {
-    const pd = state.playerData[id];
-    if (!pd) continue;
-    for (const die of pd.dice) {
-      if (die === faceValue) count++;
-      if (state.settings.wildOnes && die === 1 && faceValue !== 1) count++;
-    }
-  }
-  return count;
-}
-
-function getAllDice(state: LiarsDiceServerState): Record<string, number[]> {
-  const result: Record<string, number[]> = {};
-  for (const id of state.aliveOrder) {
-    result[id] = [...(state.playerData[id]?.dice || [])];
-  }
-  return result;
-}
-
-function advanceTurn(state: LiarsDiceServerState): void {
-  state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.aliveOrder.length;
+function clearTimers(roomCode: string): void {
+  clearTurnTimer(roomCode);
+  clearPhaseTimer(roomCode);
 }

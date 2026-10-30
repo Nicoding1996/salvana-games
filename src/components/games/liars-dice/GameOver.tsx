@@ -1,122 +1,153 @@
 'use client';
 
-import type { LiarsDicePlayerInfo } from '@/types/games/liars-dice';
+import type { LiarsDicePlayerInfo, LiarsDiceStats } from '@/types/games/liars-dice';
 import Confetti from '@/components/shared/Confetti';
+import { Hearts } from './PlayerRing';
 
 interface GameOverProps {
   players: LiarsDicePlayerInfo[];
-  eliminationOrder: { id: string; name: string; avatar: string }[];
+  eliminationOrder: string[];
+  winnerId: string | null;
+  stats: Record<string, LiarsDiceStats>;
+  rounds: number;
   myId: string | null;
   isHost: boolean;
+  hostName: string;
+  canRematch: boolean;
   onRematch: () => void;
   onBackToLobby: () => void;
   onLeaveRoom: () => void;
 }
 
-export default function GameOver({
-  players,
-  eliminationOrder,
-  myId,
-  isHost,
-  onRematch,
-  onBackToLobby,
-  onLeaveRoom,
-}: GameOverProps) {
-  // Winner is the player NOT in elimination order (last one standing)
-  const eliminatedIds = new Set(eliminationOrder.map(e => e.id));
-  const winner = players.find(p => !eliminatedIds.has(p.id));
+interface Award {
+  icon: string;
+  title: string;
+  text: string;
+}
 
-  // Build standings: winner first, then reverse elimination order
-  const standings = [
-    ...(winner ? [{ id: winner.id, name: winner.name, avatar: winner.avatar }] : []),
-    ...[...eliminationOrder].reverse(),
-  ];
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
 
-  const iWon = winner?.id === myId;
-
-  const placeSuffix = (n: number) => {
-    if (n === 1) return 'st';
-    if (n === 2) return 'nd';
-    if (n === 3) return 'rd';
-    return 'th';
+function computeAwards(stats: Record<string, LiarsDiceStats>, nameOf: (id: string) => string | null): Award[] {
+  const top = (key: keyof LiarsDiceStats): [string, number] | null => {
+    let best: [string, number] | null = null;
+    for (const [id, s] of Object.entries(stats)) {
+      if (!nameOf(id) || s[key] <= 0) continue;
+      if (!best || s[key] > best[1]) best = [id, s[key]];
+    }
+    return best;
   };
+  const awards: Award[] = [];
+  const detector = top('correctCalls');
+  if (detector) awards.push({ icon: '🕵️', title: 'Lie Detector', text: `${nameOf(detector[0])} · ${detector[1]} bluff${detector[1] === 1 ? '' : 's'} caught` });
+  const sniper = top('spotOnHits');
+  if (sniper) awards.push({ icon: '🎯', title: 'Spot-on Sniper', text: `${nameOf(sniper[0])} · ${sniper[1]} exact call${sniper[1] === 1 ? '' : 's'}` });
+  const caught = top('caught');
+  if (caught) awards.push({ icon: '🤥', title: 'Caught Red-Handed', text: `${nameOf(caught[0])} · bluff called ${caught[1]}×` });
+  return awards;
+}
+
+export default function GameOver({
+  players, eliminationOrder, winnerId, stats, rounds, myId, isHost, hostName, canRematch,
+  onRematch, onBackToLobby, onLeaveRoom,
+}: GameOverProps) {
+  const byId = new Map(players.map(p => [p.id, p]));
+  const winner = winnerId ? byId.get(winnerId) : undefined;
+  const iWon = !!myId && winnerId === myId;
+
+  // Winner first, then the last player knocked out, and so on
+  const standings = [
+    ...(winner ? [winner] : []),
+    ...[...eliminationOrder].reverse().map(id => byId.get(id)).filter((p): p is LiarsDicePlayerInfo => !!p && p.id !== winnerId),
+  ];
+  const nameOf = (id: string) => (id === myId ? 'You' : byId.get(id)?.name ?? null);
+  const awards = computeAwards(stats, nameOf);
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-4 gap-6 animate-fade-in">
+    <div className="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 pb-4 ld-table">
       {iWon && <Confetti />}
 
-      {/* Winner announcement */}
-      {winner && (
-        <div className="text-center animate-celebrate">
-          <span className="text-5xl">{winner.avatar}</span>
-          <h2 className="text-2xl font-bold text-(--text-primary) mt-2">
-            👑 {winner.name} Wins!
-          </h2>
-          {iWon && (
-            <p className="text-(--game-accent) text-sm mt-1">That&apos;s you! 🎉</p>
-          )}
+      <div className="pb-5 pt-8 text-center">
+        <div className="relative mx-auto w-fit animate-celebrate">
+          <span className="absolute -top-7 left-1/2 -translate-x-1/2 text-3xl" aria-hidden="true">👑</span>
+          <span className="block text-6xl" aria-hidden="true">{winner?.avatar ?? '🎲'}</span>
         </div>
-      )}
-
-      {/* Final standings */}
-      <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 w-full max-w-sm">
-        <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3 text-center">
-          Final Standings
-        </h3>
-        <div className="space-y-2">
-          {standings.map((player, i) => {
-            const place = i + 1;
-            const isMe = player.id === myId;
-            return (
-              <div
-                key={player.id}
-                className={`flex items-center gap-3 py-2 px-3 rounded-lg ${
-                  isMe ? 'bg-(--bg-elevated) ring-1 ring-(--brand)/30' : ''
-                }`}
-              >
-                <span className={`text-lg font-bold min-w-[32px] ${
-                  place === 1 ? 'text-(--game-accent)' : 'text-(--text-muted)'
-                }`}>
-                  {place}{placeSuffix(place)}
-                </span>
-                <span className="text-xl">{player.avatar}</span>
-                <span className="text-sm text-(--text-primary) flex-1">{player.name}</span>
-                {place === 1 && <span>👑</span>}
-              </div>
-            );
-          })}
-        </div>
+        <h2 className="mt-3 text-2xl font-bold text-(--text-primary)">
+          {iWon ? 'You win!' : winner ? `${winner.name} wins!` : 'Game over'}
+        </h2>
+        <p className="mt-1 text-sm text-(--text-secondary)">
+          Last one standing after {rounds} round{rounds === 1 ? '' : 's'}
+        </p>
       </div>
 
-      {/* Host actions */}
-      {isHost ? (
-        <div className="w-full max-w-sm space-y-2">
-          <button
-            onClick={onRematch}
-            className="w-full py-4 bg-(--game-accent) text-white rounded-xl font-semibold text-base active:scale-[0.97] transition-all"
+      <ol className="space-y-1.5" aria-label="Final standings">
+        {standings.map((p, i) => (
+          <li
+            key={p.id}
+            className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 ${
+              i === 0 ? 'border-(--game-accent)/40 bg-(--game-accent-dim)' : 'border-(--border) bg-(--bg-card)'
+            } ${p.id === myId ? 'ring-1 ring-(--brand)/40' : ''}`}
           >
-            🔄 Rematch
-          </button>
-          <button
-            onClick={onBackToLobby}
-            className="w-full py-3 bg-(--bg-card) border border-(--border) text-(--text-secondary) rounded-xl text-sm active:scale-[0.97] transition-all"
-          >
-            🏠 Back to Lobby
-          </button>
-        </div>
-      ) : (
-        <div className="w-full max-w-sm space-y-2">
-          <p className="text-sm text-(--text-muted) animate-soft-pulse text-center">
-            Waiting for host...
-          </p>
-          <button
-            onClick={onLeaveRoom}
-            className="w-full py-2.5 text-(--text-muted) text-xs hover:text-(--text-secondary) transition-colors"
-          >
-            Leave Room
-          </button>
+            <span className={`w-9 text-sm font-bold ${i === 0 ? 'text-(--game-accent)' : 'text-(--text-muted)'}`}>{ordinal(i + 1)}</span>
+            <span className="text-xl" aria-hidden="true">{p.avatar}</span>
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-(--text-primary)">
+              {p.id === myId ? 'You' : p.name}
+              {p.left && <span className="ml-1.5 text-xs font-normal text-(--text-muted)">left</span>}
+            </span>
+            {i === 0 ? <Hearts lives={p.lives} max={p.maxLives} /> : <span className="text-xs text-(--text-muted)">💀</span>}
+          </li>
+        ))}
+      </ol>
+
+      {awards.length > 0 && (
+        <div className="mt-3 grid gap-1.5">
+          {awards.map(a => (
+            <div key={a.title} className="flex items-center gap-3 rounded-2xl border border-(--border) bg-(--bg-card) px-3 py-2.5">
+              <span className="text-xl" aria-hidden="true">{a.icon}</span>
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">{a.title}</p>
+                <p className="truncate text-sm text-(--text-primary)">{a.text}</p>
+              </div>
+            </div>
+          ))}
         </div>
       )}
+
+      <div className="mt-auto space-y-2 pt-6 ld-safe-bottom">
+        {isHost ? (
+          <>
+            <button
+              type="button"
+              onClick={onRematch}
+              disabled={!canRematch}
+              className="h-14 w-full rounded-2xl bg-(--game-accent) font-heading text-base font-semibold text-(--bg-primary) transition-transform active:scale-[0.97] disabled:opacity-40"
+            >
+              {canRematch ? '🔄 Rematch' : 'Rematch needs 2+ players online'}
+            </button>
+            <button
+              type="button"
+              onClick={onBackToLobby}
+              className="h-12 w-full rounded-2xl border border-(--border) bg-(--bg-card) text-sm text-(--text-secondary) transition-transform active:scale-[0.97]"
+            >
+              🏠 Back to Lobby
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-center text-sm text-(--text-muted) animate-soft-pulse">Waiting for {hostName}…</p>
+            <button
+              type="button"
+              onClick={onLeaveRoom}
+              className="h-12 w-full rounded-2xl border border-(--border) bg-(--bg-card) text-sm text-(--text-secondary) transition-transform active:scale-[0.97]"
+            >
+              Leave Room
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

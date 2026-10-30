@@ -1,147 +1,132 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+// ============================================
+// Whose Truth? — Client Hook (Module-Level Singleton)
+// ============================================
+// Module state survives re-mounts and page navigation. Socket listeners are
+// bound once; components subscribe through useSyncExternalStore.
+
+import { useSyncExternalStore } from 'react';
 import { getSocket } from '@/lib/socket/client';
-import type { StoryThiefClientState, VoteResult } from '@/types/socket-events';
+import type { Room } from '@/types/hub';
+import type { StoryThiefClientState, StoryThiefPhase } from '@/types/games/story-thief';
 
-const initialState: StoryThiefClientState = {
-  phase: 'setup',
-  currentStory: null,
-  bluffingTeamId: null,
-  bluffingTeamMembers: [],
-  isMyStory: false,
-  hintCard: null,
-  questions: [],
-  questionCount: 0,
-  votes: {},
-  hasVoted: false,
-  hasSubmittedStory: false,
-  needsReplacement: false,
-  submittedPlayers: [],
-  totalPlayers: 0,
-  scores: {},
-  teamScores: {},
-  roundNumber: 0,
-  lastVoteResult: null,
-  timerSeconds: null,
-  storyCategory: null,
-  totalStoriesLeft: 0,
-  waitingForReplacement: false,
-};
+export interface StoryThiefNotice {
+  id: number;
+  text: string;
+}
 
-// Module-level state — survives component remounts
-let _gameState: StoryThiefClientState = initialState;
-let _timerSeconds: number | null = null;
-let _lastVoteResult: VoteResult | null = null;
+export interface StoryThiefStore {
+  state: StoryThiefClientState | null;
+  timer: number | null;                 // questioning countdown, timed mode only
+  sending: 'story' | 'vote' | null;     // sent, waiting for the server to answer
+  notice: StoryThiefNotice | null;      // server error shown as a toast
+}
+
+const PENDING_TIMEOUT_MS = 5000;
+const NOTICE_MS = 3000;
+
+const INITIAL: StoryThiefStore = { state: null, timer: null, sending: null, notice: null };
+
+let _store: StoryThiefStore = INITIAL;
+let _bound = false;
+let _nextId = 1;
+let _pendingTimer: ReturnType<typeof setTimeout> | null = null;
+let _noticeTimer: ReturnType<typeof setTimeout> | null = null;
 const _listeners = new Set<() => void>();
-let _socketBound = false;
 
-function notifyListeners() {
-  _listeners.forEach((fn) => fn());
+function update(patch: Partial<StoryThiefStore>): void {
+  _store = { ..._store, ...patch };
+  for (const fn of _listeners) fn();
 }
 
-function resetState() {
-  _gameState = initialState;
-  _timerSeconds = null;
-  _lastVoteResult = null;
-  notifyListeners();
+function clearPendingTimer(): void {
+  if (_pendingTimer) {
+    clearTimeout(_pendingTimer);
+    _pendingTimer = null;
+  }
 }
 
-// Bind socket listeners once globally (not per component mount)
-function ensureSocketBound() {
-  if (_socketBound) return;
-  _socketBound = true;
+function showNotice(text: string): void {
+  if (_noticeTimer) clearTimeout(_noticeTimer);
+  const id = _nextId++;
+  update({ notice: { id, text } });
+  _noticeTimer = setTimeout(() => {
+    if (_store.notice?.id === id) update({ notice: null });
+  }, NOTICE_MS);
+}
 
+// Phases worth a little buzz when they start
+const BUZZ_PHASES: StoryThiefPhase[] = ['reveal', 'voting', 'result'];
+
+function ensureSocketBound(): void {
+  if (_bound) return;
+  _bound = true;
   const socket = getSocket();
 
-  // Clear story-thief state when room switches away from story-thief
-  socket.on('hub:roomUpdated', (room: { currentGameId?: string | null; phase?: string }) => {
-    if (_gameState !== initialState && room.currentGameId !== 'story-thief') {
-      resetState();
-    }
-  });
-
   socket.on('story-thief:stateUpdated', (state) => {
-    _gameState = state;
-    if (state.timerSeconds !== null) {
-      _timerSeconds = state.timerSeconds;
+    const prevPhase = _store.state?.phase;
+    if (prevPhase && prevPhase !== state.phase && BUZZ_PHASES.includes(state.phase) && typeof navigator !== 'undefined') {
+      navigator.vibrate?.(35);
     }
-    // Update lastVoteResult from state (for reconnection) or clear it on phase change
-    if (state.lastVoteResult) {
-      _lastVoteResult = state.lastVoteResult;
-    } else if (state.phase !== 'result') {
-      _lastVoteResult = null;
-    }
-    notifyListeners();
+    clearPendingTimer();
+    update({
+      state,
+      sending: null,
+      timer: state.phase === 'questioning' ? state.timerSeconds : null,
+    });
   });
 
-  socket.on('story-thief:timerTick', (seconds) => {
-    _timerSeconds = seconds;
-    notifyListeners();
+  socket.on('story-thief:timerTick', (secondsLeft) => {
+    if (_store.state?.phase === 'questioning') update({ timer: secondsLeft });
   });
 
-  socket.on('story-thief:voteResult', (result) => {
-    _lastVoteResult = result;
-    notifyListeners();
+  socket.on('hub:error', (message) => {
+    if (_store.state) showNotice(message);
+  });
+
+  // Room left Whose Truth? (back to the lobby or another game): drop the game
+  socket.on('hub:roomUpdated', (room: Room) => {
+    if (_store.state && room.currentGameId !== 'story-thief') {
+      clearPendingTimer();
+      update(INITIAL);
+    }
   });
 }
 
-export function useStoryThief() {
-  const [gameState, setGameState] = useState<StoryThiefClientState>(_gameState);
-  const [timerSeconds, setTimerSeconds] = useState<number | null>(_timerSeconds);
-  const [lastVoteResult, setLastVoteResult] = useState<VoteResult | null>(_lastVoteResult);
-
-  useEffect(() => {
-    ensureSocketBound();
-
-    const listener = () => {
-      setGameState(_gameState);
-      setTimerSeconds(_timerSeconds);
-      setLastVoteResult(_lastVoteResult);
-    };
-    _listeners.add(listener);
-
-    // Sync immediately in case state changed while unmounted
-    listener();
-
-    return () => {
-      _listeners.delete(listener);
-    };
-  }, []);
-
-  const submitStory = useCallback((text: string) => {
-    getSocket().emit('story-thief:submitStory', { text });
-  }, []);
-
-  const submitVote = useCallback((suspectId: string) => {
-    getSocket().emit('story-thief:submitVote', { suspectId });
-  }, []);
-
-  const endQuestionPhase = useCallback(() => {
-    getSocket().emit('story-thief:endQuestionPhase');
-  }, []);
-
-  const submitReplacement = useCallback((text: string) => {
-    getSocket().emit('story-thief:submitReplacement', { text });
-  }, []);
-
-  const nextRound = useCallback(() => {
-    getSocket().emit('story-thief:nextRound');
-  }, []);
-
-  const endGame = useCallback(() => {
-    getSocket().emit('story-thief:endGame');
-  }, []);
-
-  return {
-    gameState,
-    timerSeconds,
-    lastVoteResult,
-    submitStory,
-    submitVote,
-    endQuestionPhase,
-    submitReplacement,
-    nextRound,
-    endGame,
+function subscribe(listener: () => void): () => void {
+  ensureSocketBound();
+  _listeners.add(listener);
+  // State may have been broadcast before we were listening
+  if (!_store.state) getSocket().emit('hub:requestState');
+  return () => {
+    _listeners.delete(listener);
   };
+}
+
+const getSnapshot = () => _store;
+const getServerSnapshot = () => INITIAL;
+
+/** Send once and lock until the server answers (safety release if it never does). */
+function sendOnce(kind: 'story' | 'vote', emit: () => void): void {
+  if (_store.sending) return;
+  update({ sending: kind });
+  emit();
+  clearPendingTimer();
+  _pendingTimer = setTimeout(() => update({ sending: null }), PENDING_TIMEOUT_MS);
+}
+
+const actions = {
+  /** Setup story, or the story owed between rounds */
+  submitStory: (text: string) => sendOnce('story', () => getSocket().emit('story-thief:submitStory', { text })),
+  submitVote: (suspectId: string) => sendOnce('vote', () => getSocket().emit('story-thief:submitVote', { suspectId })),
+  endQuestionPhase: () => getSocket().emit('story-thief:endQuestionPhase'),
+  forceReveal: () => getSocket().emit('story-thief:forceReveal'),
+  nextRound: () => getSocket().emit('story-thief:nextRound'),
+  endGame: () => getSocket().emit('story-thief:endGame'),
+};
+
+export function useStoryThief() {
+  const store = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  return { ...store, ...actions };
 }
