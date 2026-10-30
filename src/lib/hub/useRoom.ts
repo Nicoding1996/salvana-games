@@ -79,7 +79,7 @@ function ensureSocketBound() {
     setGlobalRoom(updatedRoom);
   });
 
-  socket.on('hub:kicked', (_data) => {
+  socket.on('hub:kicked', () => {
     // Kicked by host — clear state and navigate home
     _room = null;
     _playerId = null;

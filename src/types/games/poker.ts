@@ -5,14 +5,19 @@
 // ---- Phases ----
 
 export type PokerPhase =
-  | 'dealing'       // cards being dealt, squeeze animation
+  | 'dealing'       // hole cards dealt + blinds posted, deal animation plays
   | 'preflop'       // first betting round (after hole cards)
   | 'flop'          // second betting round (3 community cards)
   | 'turn'          // third betting round (4th community card)
   | 'river'         // final betting round (5th community card)
-  | 'showdown'      // reveal hands, determine winner
-  | 'roundEnd'      // show results, award pot, check eliminations
+  | 'roundEnd'      // pot awarded (showdown or uncontested), next hand auto-deals
   | 'finished';     // game over, one player has all chips
+
+export const BETTING_PHASES: readonly PokerPhase[] = ['preflop', 'flop', 'turn', 'river'];
+
+export function isBettingPhase(phase: PokerPhase): boolean {
+  return BETTING_PHASES.includes(phase);
+}
 
 // ---- Settings ----
 
@@ -22,11 +27,18 @@ export interface PokerSettings {
   blindStructure: 'slow' | 'normal' | 'fast';  // hands between blind increases
   startingBlinds: '10/20' | '25/50';
   turnTimer: 15 | 30 | 45 | 0;    // seconds, 0 = off
-  bountyMode: boolean;             // track eliminations as bounties
+  bountyMode: boolean;             // show knockouts on seats + credit eliminations
 }
 
+export const POKER_MIN_PLAYERS = 2;
+export const POKER_MAX_PLAYERS = 8;
+export const POKER_STARTING_CHIPS = [500, 1000, 2000] as const;
+export const POKER_BLIND_STRUCTURES = ['slow', 'normal', 'fast'] as const;
+export const POKER_STARTING_BLINDS = ['10/20', '25/50'] as const;
+export const POKER_TURN_TIMERS = [15, 30, 45, 0] as const;
+
 export const DEFAULT_POKER_SETTINGS: PokerSettings = {
-  maxPlayers: 6,
+  maxPlayers: POKER_MAX_PLAYERS,
   startingChips: 1000,
   blindStructure: 'normal',
   startingBlinds: '10/20',
@@ -43,6 +55,20 @@ export const BLIND_INCREASE_HANDS: Record<PokerSettings['blindStructure'], numbe
   normal: 5,
   fast: 3,
 };
+
+// ---- Pacing (server-driven) ----
+
+export const POKER_DEAL_MS = 1500;               // deal animation before preflop betting opens
+export const POKER_RUNOUT_STEP_MS = 1800;        // all-in runout: delay between streets
+export const POKER_SHOWDOWN_PAUSE_MS = 7000;     // time to read the showdown before the next hand
+export const POKER_UNCONTESTED_PAUSE_MS = 3500;  // everyone folded — shorter pause
+export const POKER_AWAY_GRACE_S = 10;            // disconnected player's first turn: grace before auto-action
+export const POKER_AWAY_REPEAT_S = 3;            // later turns while still away (already auto-acted once)
+
+// ---- Reactions ----
+
+export const POKER_REACTIONS = ['😤', '😎', '🤔', '😂', '💀', '🔥'] as const;
+export type PokerReactionEmoji = typeof POKER_REACTIONS[number];
 
 // ---- Card Types ----
 
@@ -69,6 +95,10 @@ export const RANK_VALUES: Record<Rank, number> = {
   '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14,
 };
 
+export function sameCard(a: Card, b: Card): boolean {
+  return a.rank === b.rank && a.suit === b.suit;
+}
+
 // ---- Hand Rankings ----
 
 export type HandRank =
@@ -82,19 +112,6 @@ export type HandRank =
   | 'two-pair'
   | 'one-pair'
   | 'high-card';
-
-export const HAND_RANK_ORDER: HandRank[] = [
-  'high-card',
-  'one-pair',
-  'two-pair',
-  'three-of-a-kind',
-  'straight',
-  'flush',
-  'full-house',
-  'four-of-a-kind',
-  'straight-flush',
-  'royal-flush',
-];
 
 export const HAND_RANK_NAMES: Record<HandRank, string> = {
   'royal-flush': 'Royal Flush',
@@ -112,20 +129,25 @@ export const HAND_RANK_NAMES: Record<HandRank, string> = {
 export interface HandEvaluation {
   rank: HandRank;
   rankIndex: number;        // 0 (high-card) to 9 (royal-flush)
-  bestCards: Card[];         // the 5 cards making the best hand
+  bestCards: Card[];         // the cards making the hand (5 once the flop is out, 2 preflop)
   kickers: number[];         // tiebreaker values (descending)
   description: string;       // e.g. "Two Pair, Kings & Sevens"
 }
 
 // ---- Betting Actions ----
 
+/** Actions a player can send */
 export type BettingAction = 'fold' | 'check' | 'call' | 'raise' | 'allIn';
+
+/** Everything that can appear in the hand log (adds forced blinds + opening bets) */
+export type LoggedAction = BettingAction | 'bet' | 'smallBlind' | 'bigBlind';
 
 export interface ActionHistoryEntry {
   playerId: string;
   playerName: string;
-  action: BettingAction;
-  amount: number;            // 0 for fold/check
+  action: LoggedAction;
+  amount: number;            // chips added by this action (0 for fold/check)
+  totalBet: number;          // player's bet on this street after the action ("raise to")
   phase: PokerPhase;
 }
 
@@ -143,104 +165,149 @@ export interface PokerPlayerInfo {
   name: string;
   avatar: string;
   chips: number;
-  currentBet: number;        // bet in current round
+  currentBet: number;        // chips in front of the player this street
   totalBetThisHand: number;  // total invested this hand
   folded: boolean;
   allIn: boolean;
   alive: boolean;            // still in the tournament (has chips)
+  inHand: boolean;           // dealt into the current hand
   connected: boolean;
   isDealer: boolean;
   isSmallBlind: boolean;
   isBigBlind: boolean;
-  holeCards: Card[] | null;  // only shown during showdown (for others)
-  handDescription: string | null;  // only during showdown
-  isWinner: boolean;
+  holeCards: Card[] | null;  // others' cards: only once tabled (all-in runout or showdown)
+  knockouts: number;         // players this player has eliminated
+  potsWon: number;           // pots won so far this tournament
 }
 
-export interface PokerClientState {
-  phase: PokerPhase;
-  players: PokerPlayerInfo[];
-  myCards: Card[];                    // your hole cards (always visible to you)
-  communityCards: Card[];             // revealed community cards
-  pots: Pot[];                        // main pot + side pots
-  currentBet: number;                 // highest bet in current round
-  activePlayerId: string | null;      // whose turn it is
-  isMyTurn: boolean;
-  amIAlive: boolean;                  // whether the current player is still in the tournament
-  minRaise: number;                   // minimum raise amount
-  callAmount: number;                 // how much to call (0 if can check)
-  handNumber: number;
-  blindLevel: number;                 // current small blind value
-  nextBlindIncrease: number;          // hands until next increase
-  actionHistory: ActionHistoryEntry[];
-  lastShowdown: ShowdownResult | null;
-  eliminationOrder: { id: string; name: string; avatar: string }[];
-  settings: PokerSettings;
-  isFirstHand: boolean;
-  myHandStrength: HandEvaluation | null;  // live hand evaluation for helper
+export interface PokerTurnTimer {
+  playerId: string;
+  secondsLeft: number;
+  total: number;
 }
 
-// ---- Showdown Result ----
-
-export interface ShowdownPlayerResult {
+export interface ShowdownHand {
   playerId: string;
   playerName: string;
   avatar: string;
   holeCards: Card[];
   handEvaluation: HandEvaluation;
-  potWon: number;
+  amountWon: number;
   isWinner: boolean;
 }
 
-export interface ShowdownResult {
-  players: ShowdownPlayerResult[];
-  communityCards: Card[];
-  pots: Pot[];
-  winners: { playerId: string; playerName: string; amount: number }[];
+export interface PokerHandResult {
+  uncontested: boolean;       // everyone else folded — nobody shows cards
+  potTotal: number;
+  winners: {
+    playerId: string;
+    playerName: string;
+    avatar: string;
+    amount: number;
+    handDescription: string | null;   // null when uncontested
+  }[];
+  hands: ShowdownHand[];      // tabled hands, best first (empty when uncontested)
+  winningCards: Card[];       // best winning 5-card hand, for highlighting the board
+}
+
+export interface PokerEliminationInfo {
+  id: string;
+  name: string;
+  avatar: string;
+  place: number;              // finishing position (1 = winner)
+  eliminatedBy: string | null; // name of the player who won the deciding pot
+}
+
+export interface PokerClientState {
+  phase: PokerPhase;
+  handNumber: number;
+  players: PokerPlayerInfo[];          // seating order (clockwise)
+  myCards: Card[];                     // your hole cards (always visible to you)
+  myHand: HandEvaluation | null;       // your live best hand (preflop: hole card summary)
+  communityCards: Card[];              // revealed community cards
+  pots: Pot[];                         // main pot + side pots (includes this street's bets)
+  potTotal: number;
+  currentBet: number;                  // highest bet this street
+  activePlayerId: string | null;       // whose turn it is
+  isMyTurn: boolean;
+  amIAlive: boolean;                   // whether you're still in the tournament
+  callAmount: number;                  // chips needed to call (capped at your stack)
+  minRaiseTo: number;                  // smallest legal "raise to" total
+  maxRaiseTo: number;                  // your all-in "raise to" total
+  canRaise: boolean;                   // you can raise and someone could still respond
+  smallBlind: number;
+  bigBlind: number;
+  blindsUp: boolean;                   // first hand at a new blind level
+  nextBlindIncrease: number | null;    // hands until blinds go up (null at the top level)
+  runout: boolean;                     // all-in: remaining cards are dealt with hands tabled
+  actionHistory: ActionHistoryEntry[];
+  handResult: PokerHandResult | null;  // set during roundEnd
+  nextHandInMs: number | null;         // during roundEnd: time until the next deal
+  eliminationOrder: PokerEliminationInfo[];  // first eliminated → last
+  winnerId: string | null;             // tournament winner (finished only)
+  superlatives: PokerSuperlative[];    // end-of-game awards (finished only)
+  settings: PokerSettings;
 }
 
 // ---- Server State (authoritative, never sent to clients) ----
 
+export interface PokerPlayerState {
+  holeCards: Card[];
+  chips: number;
+  currentBet: number;
+  totalBetThisHand: number;
+  folded: boolean;
+  allIn: boolean;
+  alive: boolean;                      // still in tournament
+  inHand: boolean;                     // dealt into the current hand
+  stackAtHandStart: number;            // tiebreak for same-hand eliminations
+}
+
+export interface PokerServerHandResult {
+  uncontested: boolean;
+  potTotal: number;
+  pots: { amount: number; eligiblePlayerIds: string[]; winnerIds: string[] }[];
+  winnings: Record<string, number>;
+  hands: { playerId: string; holeCards: Card[]; evaluation: HandEvaluation }[];
+  winningCards: Card[];
+}
+
 export interface PokerServerState {
   phase: PokerPhase;
   deck: Card[];                        // remaining cards in deck
-  communityCards: Card[];              // all 5 (dealt progressively)
+  communityCards: Card[];              // all 5 (dealt up front, revealed progressively)
   revealedCommunityCount: number;      // how many are visible (0, 3, 4, 5)
-  playerData: Record<string, {
-    holeCards: Card[];
-    chips: number;
-    currentBet: number;
-    totalBetThisHand: number;
-    folded: boolean;
-    allIn: boolean;
-    alive: boolean;                    // still in tournament
-  }>;
-  seatingOrder: string[];              // all player IDs in original order
-  aliveOrder: string[];                // players still in tournament
-  dealerIndex: number;                 // index into aliveOrder for dealer button
-  currentPlayerIndex: number;          // index into active betting order
-  bettingOrder: string[];              // order for current betting round
-  currentBet: number;                  // highest bet this round
-  minRaise: number;                    // minimum raise increment
-  lastRaiser: string | null;           // who last raised (for action-closes-at logic)
-  actedThisRound: Set<string>;         // players who have acted since last raise (or round start)
-  pots: Pot[];
+  playerData: Record<string, PokerPlayerState>;
+  names: Record<string, { name: string; avatar: string }>;  // snapshot so departed players keep a label
+  seatingOrder: string[];              // all player IDs, fixed clockwise order
+  dealerId: string;
+  smallBlindId: string;
+  bigBlindId: string;
+  activePlayerId: string | null;       // whose turn it is (null outside betting)
+  currentBet: number;                  // highest bet this street
+  minRaise: number;                    // minimum raise increment (last full raise)
+  actedThisRound: Set<string>;         // players who acted since the last full raise
+  runout: boolean;                     // betting closed with cards still to come
   actionHistory: ActionHistoryEntry[];
   handNumber: number;
   blindLevel: number;                  // index into BLIND_LEVELS
   handsAtCurrentLevel: number;         // hands played at this blind level
   settings: PokerSettings;
-  eliminationOrder: string[];          // player IDs, first eliminated → last
+  eliminationOrder: { id: string; eliminatedBy: string | null }[];  // first eliminated → last
+  handResult: PokerServerHandResult | null;
+  // Pacing (owned by the socket driver)
   turnTimerEnd: number | null;
-  lastShowdown: ShowdownResult | null;
+  turnTimerTotal: number;
+  turnTimerPlayerId: string | null;
+  nextHandAt: number | null;
+  autoActed: Set<string>;              // away players already auto-acted once (shorter grace)
   // Stats tracking for superlatives
   stats: {
     biggestPot: { amount: number; winnerId: string | null };
-    handsPlayed: Record<string, number>;       // playerId → hands participated
-    handsWon: Record<string, number>;          // playerId → hands won
-    bluffsWon: Record<string, number>;         // playerId → pots won without best hand
+    handsPlayed: Record<string, number>;       // playerId → hands dealt in
+    handsWon: Record<string, number>;          // playerId → pots won
+    bluffsWon: Record<string, number>;         // playerId → uncontested pots taken with nothing
     eliminations: Record<string, number>;      // playerId → players eliminated
-    biggestAllIn: { amount: number; playerId: string | null };
     foldCount: Record<string, number>;         // playerId → times folded
   };
 }
@@ -254,11 +321,3 @@ export interface PokerSuperlative {
   playerName: string;
   value: string;
 }
-
-// ---- Constants ----
-
-export const MIN_PLAYERS = 2;
-export const MAX_PLAYERS = 8;
-export const CARDS_PER_PLAYER = 2;
-export const COMMUNITY_CARD_COUNT = 5;
-export const BURN_CARDS = 3;  // one before flop, turn, river

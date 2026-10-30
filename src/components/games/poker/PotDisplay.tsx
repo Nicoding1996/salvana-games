@@ -1,29 +1,30 @@
 'use client';
 
 import type { Pot } from '@/types/games/poker';
+import { formatChips } from './format';
 
 interface PotDisplayProps {
   pots: Pot[];
+  potTotal: number;
 }
 
-export function PotDisplay({ pots }: PotDisplayProps) {
-  const totalPot = pots.reduce((sum, p) => sum + p.amount, 0);
-
-  if (totalPot === 0) return null;
+export default function PotDisplay({ pots, potTotal }: PotDisplayProps) {
+  if (potTotal <= 0) return null;
 
   return (
-    <div className="text-center py-1">
-      <span className="text-sm font-semibold text-(--game-secondary)">
-        🪙 Pot: {totalPot}
-      </span>
+    <div className="flex flex-col items-center gap-0.5" aria-live="polite">
+      {/* Re-keyed on change so the amount pops when chips go in */}
+      <div
+        key={potTotal}
+        className="animate-poker-pop flex items-center gap-1.5 rounded-full border border-(--game-secondary)/25 bg-(--bg-primary)/60 py-0.5 pl-1 pr-2.5 text-[13px] font-semibold tabular-nums text-(--game-secondary)"
+      >
+        <span className="poker-chip poker-chip-lg" aria-hidden="true" />
+        <span>Pot {formatChips(potTotal)}</span>
+      </div>
       {pots.length > 1 && (
-        <div className="flex justify-center gap-2 mt-0.5">
-          {pots.map((pot, i) => (
-            <span key={i} className="text-[10px] text-(--text-muted)">
-              {i === 0 ? 'Main' : `Side ${i}`}: {pot.amount}
-            </span>
-          ))}
-        </div>
+        <p className="text-[10px] tabular-nums text-(--text-secondary)">
+          {pots.map((pot, i) => `${i === 0 ? 'Main' : `Side ${i}`} ${formatChips(pot.amount)}`).join(' · ')}
+        </p>
       )}
     </div>
   );

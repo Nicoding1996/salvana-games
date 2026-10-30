@@ -1,103 +1,174 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useFlip7 } from '@/lib/games/flip7/useFlip7';
 import type { useRoom } from '@/lib/hub/useRoom';
+import { ACTION_CARD_LABELS, ACTION_TIMEOUT_MS, computeRoundScore } from '@/types/games/flip7';
+import RulesSheet from '@/components/shared/RulesSheet';
 import FlipAnimation from './FlipAnimation';
-import ActionSheet from './ActionSheet';
 import ActionAnimation from './ActionAnimation';
-import FrozenSelfOverlay from './FrozenSelfOverlay';
+import ActionSheet from './ActionSheet';
 import RoundSummary from './RoundSummary';
 import GameOver from './GameOver';
+import TimerBar from './TimerBar';
+import { CardBack, DeckPile, NumberCard } from './CardArt';
+import { MyHand, OpponentRow } from './PlayerHands';
 
 interface Flip7GameProps {
   roomHook: ReturnType<typeof useRoom>;
 }
 
+// The first-round quick rules are shown once per page load.
+let quickRulesSeen = false;
+
+function listNames(names: string[]): string {
+  if (names.length <= 2) return names.join(' & ');
+  return `${names.slice(0, 2).join(', ')} & ${names.length - 2} more`;
+}
+
+const DEAL_FLY = [
+  { dx: '-130px', dy: '-150px', rot: '-28deg' },
+  { dx: '130px', dy: '-150px', rot: '24deg' },
+  { dx: '-160px', dy: '20px', rot: '-14deg' },
+  { dx: '160px', dy: '20px', rot: '16deg' },
+  { dx: '-100px', dy: '170px', rot: '-8deg' },
+  { dx: '100px', dy: '170px', rot: '10deg' },
+];
+
+function DealingScreen({ round }: { round: number }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-8 f7-table">
+      <div className="relative h-[134px] w-[96px]" aria-hidden="true">
+        {DEAL_FLY.map((f, i) => (
+          <CardBack
+            key={i}
+            size="lg"
+            className="absolute left-0 top-0 f7-deal-card"
+            style={{ '--dx': f.dx, '--dy': f.dy, '--rot': f.rot, '--f7-delay': `${i * 150}ms` } as CSSProperties}
+          />
+        ))}
+        <CardBack size="lg" className="absolute left-0 top-0" />
+      </div>
+      <div className="text-center">
+        <p className="text-[10px] uppercase tracking-[0.2em] text-(--text-muted)">{round === 1 ? 'New game' : 'Next up'}</p>
+        <h2 className="mt-1 text-2xl font-bold text-(--text-primary)">Round {round}</h2>
+        <p className="mt-1 text-sm text-(--text-secondary) animate-soft-pulse">Shuffling and dealing…</p>
+      </div>
+    </div>
+  );
+}
+
+function QuickRules({ targetScore, yourMove, onClose }: { targetScore: number; yourMove: boolean; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[45] flex items-end justify-center" role="dialog" aria-modal="true" aria-labelledby="f7-quick-rules">
+      <div className="absolute inset-0 bg-black/60 animate-fade-in" onClick={onClose} />
+      <div className="relative w-full max-w-lg rounded-t-3xl px-5 pt-5 flip7-card f7-safe-bottom flip7-sheet-up">
+        <h2 id="f7-quick-rules" className="text-center text-lg font-bold text-(--text-primary)">🃏 How Flip 7 works</h2>
+        <ul className="mt-4 space-y-3 text-sm text-(--text-secondary)">
+          <li className="flex items-center gap-3">
+            <div className="flex w-[60px] shrink-0 justify-center -space-x-2" aria-hidden="true">
+              <NumberCard value={3} size="sm" />
+              <NumberCard value={8} size="sm" />
+            </div>
+            <span>
+              On your turn, <strong className="text-(--game-accent)">HIT</strong> to flip a card
+              or <strong className="text-(--text-primary)">STAY</strong> to bank your points.
+            </span>
+          </li>
+          <li className="flex items-center gap-3">
+            <div className="flex w-[60px] shrink-0 justify-center -space-x-2" aria-hidden="true">
+              <NumberCard value={8} size="sm" />
+              <NumberCard value={8} size="sm" bust />
+            </div>
+            <span>Flip a number you already have and you <strong className="text-(--danger)">bust</strong>: 0 points this round.</span>
+          </li>
+          <li className="flex items-center gap-3">
+            <span className="w-[60px] shrink-0 text-center text-xl" aria-hidden="true">⭐</span>
+            <span>Collect 7 different numbers for <strong className="text-(--game-accent)">Flip 7</strong>: +15 and the round ends.</span>
+          </li>
+          <li className="flex items-center gap-3">
+            <span className="w-[60px] shrink-0 whitespace-nowrap text-center text-sm" aria-hidden="true">❄️⚡💚</span>
+            <span>Freeze banks someone, Flip Three makes them flip 3, Second Chance saves one duplicate. +2/+4 add points, ×2 doubles your numbers.</span>
+          </li>
+        </ul>
+        <p className="mt-4 text-center text-xs text-(--text-muted)">First to {targetScore} points wins.</p>
+        {yourMove && (
+          <p className="mt-2 text-center text-sm font-semibold text-(--game-accent) animate-soft-pulse">It&apos;s your turn!</p>
+        )}
+        <button
+          onClick={onClose}
+          className="mt-3 w-full rounded-xl bg-(--game-accent) py-3.5 font-semibold text-(--bg-primary) transition-all active:scale-[0.97]"
+        >
+          {yourMove ? 'Play my turn' : "Let's go!"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Flip7Game({ roomHook }: Flip7GameProps) {
-  const { playerId, isHost, connected, leaveRoom } = roomHook;
+  const { playerId, isHost, leaveRoom } = roomHook;
+  const myId = playerId ?? '';
   const {
-    gameState,
-    displayState,
-    turnTimer,
-    lastFlipEvent,
-    flipKey,
-    chaosSubmitted,
-    actionNotification,
-    hit,
-    stay,
-    useAction,
-    giveModifier,
-    chaosChoice,
-    nextRound,
-    endGame,
-    rematch,
+    state, display, timer, reveal, revealBusy, toast, myChaosChoice, inputLocked,
+    hit, stay, chooseTarget, chaosChoice, nextRound, endGame, rematch,
   } = useFlip7();
 
-  const [showRules, setShowRules] = useState(gameState.round === 1);
+  const [showQuickRules, setShowQuickRules] = useState(() => !quickRulesSeen && state.round === 1);
+  const [showRules, setShowRules] = useState(false);
   const [endGameConfirm, setEndGameConfirm] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  const { phase, players, isMyTurn, activePlayerId, settings, myCards,
-    mySecondChances, myRoundStatus, pendingAction,
-    pendingModifier, deckRemaining, round,
-    flipSevenAchievedBy, roundScores, winnerId } = gameState;
+  const { phase, settings, pendingAction } = state;
+  const chaos = settings.mode === 'chaos';
+  const me = state.players.find(p => p.id === myId);
+  const displayMe = display.players.find(p => p.id === myId);
+  const inGame = !!me;
+  const myActive = inGame && state.myRoundStatus === 'active';
+  const iAmDrawer = pendingAction?.drawerId === myId;
+  const iLocked = chaos && state.chaosSubmitted.includes(myId);
+  const roundEnding = !!state.flipSevenAchievedBy || !state.players.some(p => p.roundStatus === 'active');
 
-  const activePlayer = players.find(p => p.id === activePlayerId);
-  const myPlayer = players.find(p => p.id === playerId);
+  // Is the table waiting on me right now?
+  const yourMove = phase === 'playing' && !roundEnding && (
+    pendingAction ? iAmDrawer : chaos ? myActive && !iLocked : state.isMyTurn
+  );
+  // Buttons stay visible on my move but unlock only after the current reveal, so
+  // everyone watches each card and my own flip never queues behind someone else's.
+  const showButtons = yourMove && !pendingAction;
+  const buttonsDisabled = inputLocked || revealBusy;
+  const showSheet = phase === 'playing' && iAmDrawer && !!pendingAction && !revealBusy;
+  const readyToPlay = yourMove && !revealBusy;
 
-  // Display-masked hand data: cards still mid-flip-animation are hidden from the
-  // table so each one lands exactly when its overlay finishes (no spoiling).
-  // Control logic (buttons, turn) keeps using the authoritative gameState above.
-  const dPlayers = displayState.players;
-  const dMyCards = displayState.myCards;
-  const dMyModifiers = displayState.myModifiers;
-  const dMyRoundStatus = displayState.myRoundStatus;
-  const dMyPlayer = dPlayers.find(p => p.id === playerId);
-
-  // Auto-scroll the active player's hand into view + haptic when it becomes my turn
-  const activeCardRef = useRef<HTMLDivElement>(null);
-  const wasMyTurnRef = useRef(false);
-
+  // Haptic nudge when it's my move and the table is ready for it
   useEffect(() => {
-    if (phase !== 'playing') return;
-    if (activeCardRef.current) {
-      activeCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-    if (isMyTurn && !wasMyTurnRef.current) {
-      navigator.vibrate?.(35);
-    }
-    wasMyTurnRef.current = isMyTurn;
-  }, [activePlayerId, isMyTurn, phase]);
+    if (readyToPlay) navigator.vibrate?.(35);
+  }, [readyToPlay]);
 
-  // One-shot "you got iced" reaction + haptic, fired off the discrete freeze
-  // event rather than myRoundStatus — the frozen status lingers through the
-  // roundEnd boundary, so a status-based trigger could replay next round.
-  // Each freeze pushes a fresh notification object; seeding the ref with the
-  // current value keeps a mid-freeze reconnect from re-triggering.
-  const [frozenSelfKey, setFrozenSelfKey] = useState(0);
-  const lastFreezeNotifRef = useRef(actionNotification);
+  // Haptics for my own big moments
   useEffect(() => {
-    const n = actionNotification;
-    if (
-      n && n !== lastFreezeNotifRef.current &&
-      n.type === 'freeze' && n.targetId === playerId
-    ) {
-      setFrozenSelfKey(k => k + 1);
-      navigator.vibrate?.([0, 70, 50, 130]);
+    if (!reveal) return;
+    if (reveal.kind === 'action') {
+      if (reveal.action.targetId === myId) navigator.vibrate?.([0, 70, 50, 130]);
+      return;
     }
-    lastFreezeNotifRef.current = n;
-  }, [actionNotification, playerId]);
+    const mine = reveal.flips.find(f => f.playerId === myId);
+    if (mine?.flipSeven) navigator.vibrate?.([0, 60, 40, 60, 40, 160]);
+    else if (mine?.result === 'bust') navigator.vibrate?.([0, 120, 60, 220]);
+  }, [reveal, myId]);
 
-  // Retire the one-shot overlay back to 0 once it has finished playing. Without
-  // this, frozenSelfKey stays > 0 for the rest of the game and the overlay
-  // replays every time the playing UI re-mounts at a round boundary (the
-  // playing subtree unmounts during roundEnd). Only the frozen player ever has
-  // a non-zero key, which is why the replay was unique to them.
+  // Keep whoever the table is waiting on in view
   useEffect(() => {
-    if (frozenSelfKey === 0) return;
-    const t = setTimeout(() => setFrozenSelfKey(0), 2300);
-    return () => clearTimeout(t);
-  }, [frozenSelfKey]);
+    listRef.current
+      ?.querySelector('[data-active="true"]')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [state.activePlayerId, pendingAction?.drawerId]);
+
+  const closeRules = useCallback(() => setShowRules(false), []);
+  const closeQuickRules = () => {
+    quickRulesSeen = true;
+    setShowQuickRules(false);
+  };
 
   const handleEndGame = () => {
     if (!endGameConfirm) {
@@ -108,425 +179,268 @@ export default function Flip7Game({ roomHook }: Flip7GameProps) {
     endGame();
   };
 
-  // Rules overlay (first round only)
-  if (showRules && gameState.round === 1 && phase === 'playing') {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-md mx-auto animate-fade-in" data-game="flip-7">
-        <div className="bg-(--bg-card) border border-(--border) rounded-2xl p-6 space-y-4">
-          <h2 className="text-xl font-bold text-(--text-primary) text-center">🃏 How to Play</h2>
-          <div className="space-y-3 text-sm text-(--text-secondary)">
-            <p>Each round, collect unique number cards (0–12) without drawing a duplicate.</p>
-            <p>On your turn: <strong className="text-(--game-accent)">HIT</strong> to draw a card, or <strong>STAY</strong> to bank your points.</p>
-            <p>Draw a duplicate? You <strong className="text-(--danger)">BUST</strong> — score 0 for the round.</p>
-            <p>Collect 7 unique numbers? <strong className="text-(--game-accent)">FLIP 7!</strong> Round ends, you get +15 bonus points.</p>
-            <ul className="list-disc list-inside space-y-1 pl-2 text-xs">
-              <li>❄️ <strong>Freeze</strong> — force someone to stay</li>
-              <li>⚡ <strong>Flip Three</strong> — force someone to draw 3 cards</li>
-              <li>💚 <strong>Second Chance</strong> — survive one bust</li>
-              <li>+2, +4, ×2 — score modifiers</li>
-            </ul>
-            <p>First to <strong>{settings.targetScore} points</strong> wins!</p>
-          </div>
-          <button
-            onClick={() => setShowRules(false)}
-            className="w-full py-3.5 bg-(--game-accent) text-black rounded-xl font-semibold active:scale-[0.97] transition-all"
-          >
-            Let&apos;s Go! 🃏
-          </button>
-        </div>
-      </div>
-    );
-  }
+  let body: ReactNode;
 
-  // Game Over
   if (phase === 'finished') {
-    return (
-      <div data-game="flip-7">
-        {lastFlipEvent && (
-          <FlipAnimation key={flipKey} card={lastFlipEvent.card} result={lastFlipEvent.result} playerName={lastFlipEvent.playerName} isMe={lastFlipEvent.playerId === playerId} />
-        )}
-        <GameOver
-          players={players}
-          winnerId={winnerId}
-          roundScores={roundScores}
-          myId={playerId || ''}
-          isHost={isHost}
-          onRematch={rematch}
-          onBackToLobby={endGame}
-          onLeaveRoom={leaveRoom}
-        />
-      </div>
+    body = (
+      <GameOver
+        players={state.players}
+        winnerId={state.winnerId}
+        roundHistory={state.roundHistory}
+        myId={myId}
+        isHost={isHost}
+        onRematch={rematch}
+        onBackToLobby={endGame}
+        onLeaveRoom={leaveRoom}
+      />
     );
-  }
-
-  // Round Summary
-  if (phase === 'roundEnd') {
-    return (
-      <div data-game="flip-7">
-        {lastFlipEvent && (
-          <FlipAnimation key={flipKey} card={lastFlipEvent.card} result={lastFlipEvent.result} playerName={lastFlipEvent.playerName} isMe={lastFlipEvent.playerId === playerId} />
-        )}
-        <RoundSummary
-          key={round}
-          players={players}
-          roundScores={roundScores}
-          round={round}
-          flipSevenBy={flipSevenAchievedBy}
-          winnerId={winnerId}
-          isHost={isHost}
-          onNextRound={nextRound}
-          onEndGame={handleEndGame}
-          endGameConfirm={endGameConfirm}
-        />
-      </div>
+  } else if (phase === 'roundEnd') {
+    body = (
+      <RoundSummary
+        key={state.round}
+        players={state.players}
+        roundScores={state.roundScores}
+        round={state.round}
+        targetScore={settings.targetScore}
+        myId={myId}
+        isHost={isHost}
+        onNextRound={nextRound}
+        onEndGame={handleEndGame}
+        endGameConfirm={endGameConfirm}
+      />
     );
-  }
+  } else if (phase === 'dealing') {
+    body = <DealingScreen round={state.round} />;
+  } else {
+    // ---- Turn banner ----
+    const activePlayer = state.players.find(p => p.id === state.activePlayerId);
+    const drawer = pendingAction ? state.players.find(p => p.id === pendingAction.drawerId) : undefined;
+    const sevenBy = display.flipSevenAchievedBy
+      ? state.players.find(p => p.id === display.flipSevenAchievedBy)
+      : undefined;
+    const waitingOn = chaos
+      ? state.players.filter(p => p.roundStatus === 'active' && p.id !== myId && !state.chaosSubmitted.includes(p.id))
+      : [];
 
-  // Dealing phase
-  if (phase === 'dealing') {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center" data-game="flip-7">
-        <div className="animate-soft-pulse text-center">
-          <p className="text-4xl mb-3">🃏</p>
-          <p className="text-sm text-(--text-secondary)">Dealing cards...</p>
-        </div>
-      </div>
-    );
-  }
+    let bannerText: string;
+    let bannerTone = 'var(--text-secondary)';
+    if (sevenBy) {
+      bannerText = sevenBy.id === myId ? '🎉 You hit FLIP 7! Round over' : `🎉 ${sevenBy.name} hit FLIP 7! Round over`;
+      bannerTone = 'var(--game-accent)';
+    } else if (roundEnding) {
+      bannerText = revealBusy ? '🃏 Flipping…' : 'Round over · adding up scores…';
+    } else if (pendingAction) {
+      const info = ACTION_CARD_LABELS[pendingAction.cardKind];
+      bannerText = iAmDrawer
+        ? `${info.icon} ${info.name}! Choose your target`
+        : `${info.icon} ${drawer?.name ?? 'Someone'} is choosing a ${info.name} target…`;
+      bannerTone = info.color;
+    } else if (chaos) {
+      if (revealBusy) {
+        bannerText = '⚡ Revealing everyone’s cards…';
+      } else if (myActive && !iLocked) {
+        bannerText = '⚡ Chaos round: everyone picks at once';
+        bannerTone = 'var(--game-accent)';
+      } else {
+        bannerText = waitingOn.length > 0 ? `Waiting for ${listNames(waitingOn.map(p => p.name))}…` : 'Revealing…';
+      }
+    } else if (state.isMyTurn) {
+      bannerText = '🎯 Your turn: hit or stay?';
+      bannerTone = 'var(--game-accent)';
+    } else if (activePlayer) {
+      bannerText = `${activePlayer.avatar} ${activePlayer.name}'s turn`;
+    } else {
+      bannerText = 'Waiting…';
+    }
+    const timerTotal = pendingAction ? (settings.turnTimer || ACTION_TIMEOUT_MS / 1000) : settings.turnTimer;
 
-  // Determine HIT button danger level
-  const cardCount = myCards.length;
-  const hitDangerClass = cardCount >= 6
-    ? 'bg-(--danger) text-white'
-    : cardCount >= 4
-      ? 'bg-gradient-to-r from-(--game-accent) to-(--danger) text-black'
-      : 'bg-(--game-accent) text-black';
+    // ---- Footer: HIT / STAY or what's happening ----
+    const myScore = computeRoundScore(state.myCards.map(c => c.value), state.myModifiers, false);
+    const shownScore = computeRoundScore(display.myCards.map(c => c.value), display.myModifiers, false);
+    const protectedBySecondChance = state.mySecondChances > 0;
+    const riskPct = Math.round((state.myBustChance ?? 0) * 100);
+    const riskTone = protectedBySecondChance
+      ? 'var(--f7-second)'
+      : riskPct < 15 ? 'var(--game-accent)' : riskPct < 35 ? 'var(--f7-flip3)' : 'var(--danger)';
 
-  // Playing phase — main game UI
-  return (
-    <div className="flex-1 flex flex-col max-w-lg mx-auto w-full" data-game="flip-7">
-      {/* Reconnecting banner */}
-      {!connected && (
-        <div className="bg-(--danger)/20 text-(--danger) text-xs text-center py-1.5 px-3">
-          Reconnecting...
-        </div>
-      )}
+    let statusLine: string;
+    if (!inGame) statusLine = '👀 Watching this game. You can join the next one.';
+    else if (display.myRoundStatus === 'busted') statusLine = '💀 Busted · 0 points this round';
+    else if (display.myRoundStatus === 'frozen') statusLine = `❄️ Frozen · banked ${shownScore}`;
+    else if (display.myRoundStatus === 'stayed') statusLine = `🛡️ Banked ${shownScore} · watching the table`;
+    else if (iAmDrawer) statusLine = 'Get ready to pick a target…';
+    else if (chaos && iLocked) statusLine = `🔒 Locked in${myChaosChoice ? `: ${myChaosChoice.toUpperCase()}` : ''} · waiting for others`;
+    else if (chaos && revealBusy) statusLine = 'Revealing everyone’s cards…';
+    else if (pendingAction) statusLine = `${drawer?.name ?? 'Someone'} is picking a target…`;
+    else if (roundEnding) statusLine = revealBusy ? 'Watching the flip…' : 'Round over · adding up scores…';
+    else if (activePlayer) statusLine = `Waiting for ${activePlayer.name}…`;
+    else statusLine = 'Waiting…';
 
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="text-lg">🃏</span>
-          <div>
-            <h1 className="text-sm font-bold text-(--text-primary) leading-tight">Flip 7</h1>
-            <p className="text-[10px] text-(--text-muted)">Round {round} · Deck: {deckRemaining}</p>
-          </div>
-        </div>
+    const avatars = Object.fromEntries(state.players.map(p => [p.id, p.avatar]));
+    const others = display.players.filter(p => p.id !== myId);
 
-        {/* Turn timer */}
-        {turnTimer !== null && (
-          <div className={`text-lg font-mono font-bold px-3 py-1 rounded-full ${
-            turnTimer <= 5 ? 'text-(--danger) bg-(--danger)/10 animate-timer-urgent' : 'text-(--text-secondary) bg-(--bg-card)'
-          }`}>
-            {turnTimer}s
-          </div>
-        )}
-
-        {/* My score */}
-        <div className="text-right">
-          <p className="text-xs text-(--text-muted)">Score</p>
-          <p className="text-sm font-bold text-(--text-primary)">{myPlayer?.cumulativeScore || 0}</p>
-        </div>
-      </div>
-
-      {/* Action notification toast */}
-      {actionNotification && (
-        <div className={`mx-4 mb-2 p-3 rounded-xl border text-center animate-slide-up ${
-          actionNotification.type === 'freeze'
-            ? 'bg-blue-500/10 border-blue-500/30'
-            : 'bg-yellow-500/10 border-yellow-500/30'
-        }`}>
-          {actionNotification.type === 'freeze' ? (
-            <p className="text-sm font-semibold text-blue-400">
-              ❄️ {actionNotification.byId === actionNotification.targetId
-                ? (actionNotification.byId === playerId
-                    ? 'You froze yourself!'
-                    : `${actionNotification.byName} froze themselves!`)
-                : actionNotification.targetId === playerId
-                ? `${actionNotification.byName} froze you!`
-                : `${actionNotification.byName} froze ${actionNotification.targetName}!`
-              }
-            </p>
-          ) : (
-            <p className="text-sm font-semibold text-yellow-400">
-              ⚡ {actionNotification.byId === actionNotification.targetId
-                ? (actionNotification.byId === playerId
-                    ? 'You forced yourself to draw 3!'
-                    : `${actionNotification.byName} forced themselves to draw 3!`)
-                : actionNotification.targetId === playerId
-                ? `${actionNotification.byName} forced you to draw 3!`
-                : `${actionNotification.byName} forced ${actionNotification.targetName} to draw 3!`
-              }
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Turn indicator */}
-      <div className="text-center py-2">
-        {flipSevenAchievedBy ? (
-          <p className="text-sm font-semibold text-(--game-accent)">
-            {flipSevenAchievedBy === playerId
-              ? '🎉 FLIP 7! Round over'
-              : `🎉 ${players.find(p => p.id === flipSevenAchievedBy)?.name ?? 'Someone'} hit Flip 7!`}
-          </p>
-        ) : settings.mode === 'classic' && (
-          isMyTurn ? (
-            <p className="text-sm font-semibold text-(--game-accent)">Your turn — Hit or Stay?</p>
-          ) : activePlayer ? (
-            <p className="text-xs text-(--text-muted)">
-              {activePlayer.avatar} {activePlayer.name}&apos;s turn...
-            </p>
-          ) : null
-        )}
-        {!flipSevenAchievedBy && settings.mode === 'chaos' && myRoundStatus === 'active' && (
-          <p className="text-sm font-semibold text-(--game-accent)">Choose: Hit or Stay?</p>
-        )}
-      </div>
-
-      {/* All players' hands — scrollable */}
-      <div className="flex-1 overflow-y-auto px-3 space-y-2 pb-2">
-        {/* Your hand (highlighted) */}
-        <div
-          ref={isMyTurn ? activeCardRef : undefined}
-          className={`relative overflow-hidden rounded-xl border-2 p-3 ${
-            isMyTurn ? 'border-(--game-accent) bg-(--game-accent)/5 flip7-turn-glow' : 'border-(--border-light) bg-(--bg-card)'
-          } ${dMyRoundStatus === 'busted' ? 'flip7-bust-settle' : ''} ${dMyRoundStatus === 'frozen' ? 'flip7-frost' : ''}`}
-        >
-          {/* Frost watermark for frozen state */}
-          {dMyRoundStatus === 'frozen' && (
-            <span className="pointer-events-none absolute right-2 top-1 text-3xl opacity-25 select-none">❄️</span>
-          )}
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <span className="text-sm">{myPlayer?.avatar}</span>
-              <span className="text-xs font-semibold text-(--text-primary)">You</span>
-              {dMyRoundStatus === 'busted' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--danger)/20 text-(--danger) font-bold">BUST</span>}
-              {dMyRoundStatus === 'stayed' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--text-muted)/20 text-(--text-muted) font-bold">STAYED</span>}
-              {dMyRoundStatus === 'frozen' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">FROZEN</span>}
-            </div>
-            <span className="text-xs font-bold text-(--game-accent)">
-              +{(() => {
-                if (dMyRoundStatus === 'busted') return 0;
-                let base = dMyCards.reduce((s, c) => s + c.value, 0);
-                const times2 = dMyModifiers.filter(m => m === 'times2').length;
-                base *= Math.pow(2, times2);
-                base += dMyModifiers.reduce((s, m) => m === 'plus2' ? s + 2 : m === 'plus4' ? s + 4 : s, 0);
-                return base;
-              })()} this round
-            </span>
-          </div>
-          <div className="flex gap-1.5 flex-wrap">
-            {/* Number cards first (sorted by value) */}
-            {[...dMyCards].sort((a, b) => a.value - b.value).map((card, i) => {
-              const val = card.value;
-              return (
-                <div key={i} className="w-11 h-14 rounded-lg flex flex-col items-center justify-center shadow-sm" style={{
-                  backgroundColor: val <= 2 ? '#fef3c7' : val <= 5 ? '#ecfdf5' : val <= 8 ? '#eff6ff' : val <= 10 ? '#f5f3ff' : '#fdf2f8',
-                  border: `1.5px solid ${val <= 2 ? '#f59e0b' : val <= 5 ? '#10b981' : val <= 8 ? '#3b82f6' : val <= 10 ? '#8b5cf6' : '#ec4899'}`,
-                }}>
-                  <span className="text-base font-bold" style={{ color: val <= 2 ? '#92400e' : val <= 5 ? '#065f46' : val <= 8 ? '#1e40af' : val <= 10 ? '#5b21b6' : '#9d174d' }}>{val}</span>
-                  <span className="text-[7px]" style={{ color: val <= 2 ? '#f59e0b' : val <= 5 ? '#10b981' : val <= 8 ? '#3b82f6' : val <= 10 ? '#8b5cf6' : '#ec4899' }}>pts</span>
-                </div>
-              );
-            })}
-            {/* Show bust card with red highlight */}
-            {dMyRoundStatus === 'busted' && dMyPlayer?.bustCard !== null && dMyPlayer?.bustCard !== undefined && (
-              <div className="w-11 h-14 rounded-lg flex flex-col items-center justify-center shadow-sm bg-red-100 border-2 border-red-500">
-                <span className="text-base font-bold text-red-600">{dMyPlayer.bustCard}</span>
-                <span className="text-[7px] text-red-400">💀</span>
-              </div>
-            )}
-            {dMyModifiers.map((mod, i) => (
-              <div key={`m${i}`} className="w-11 h-14 rounded-lg flex items-center justify-center shadow-sm bg-(--bg-elevated) border border-(--game-accent)/40">
-                <span className="text-sm font-bold text-(--game-accent)">{mod === 'plus2' ? '+2' : mod === 'plus4' ? '+4' : '×2'}</span>
-              </div>
-            ))}
-            {mySecondChances > 0 && (
-              <div className="w-11 h-14 rounded-lg flex items-center justify-center shadow-sm bg-(--bg-elevated) border border-green-500/40">
-                <span className="text-sm">💚</span>
-              </div>
-            )}
-            {dMyCards.length === 0 && dMyRoundStatus === 'active' && (
-              <span className="text-[10px] text-(--text-muted) py-2">Waiting for cards...</span>
-            )}
-          </div>
-        </div>
-
-        {/* Other players' hands */}
-        {dPlayers.filter(p => p.id !== playerId).map(p => {
-          const isActive = p.id === activePlayerId;
-          return (
-            <div
-              key={p.id}
-              ref={isActive ? activeCardRef : undefined}
-              className={`relative overflow-hidden rounded-xl border p-3 ${
-                isActive ? 'border-(--game-accent)/50 bg-(--game-accent)/5 flip7-turn-glow' : 'border-(--border) bg-(--bg-card)/50'
-              } ${p.roundStatus === 'busted' ? 'opacity-50 flip7-bust-settle' : ''} ${p.roundStatus === 'frozen' ? 'flip7-frost' : ''}`}
-            >
-              {/* Frost watermark for frozen state */}
-              {p.roundStatus === 'frozen' && (
-                <span className="pointer-events-none absolute right-2 top-1 text-2xl opacity-25 select-none">❄️</span>
-              )}              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm">{p.avatar}</span>
-                  <span className="text-xs font-semibold text-(--text-primary)">{p.name}</span>
-                  {p.roundStatus === 'busted' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--danger)/20 text-(--danger) font-bold">BUST</span>}
-                  {p.roundStatus === 'stayed' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-(--text-muted)/20 text-(--text-muted) font-bold">STAYED</span>}
-                  {p.roundStatus === 'frozen' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">FROZEN</span>}
-                </div>
-                <span className="text-[10px] font-semibold text-(--text-secondary)">
-                  +{(() => {
-                    if (p.roundStatus === 'busted') return 0;
-                    let base = (p.visibleCards || []).reduce((s: number, v: number) => s + v, 0);
-                    const times2 = (p.modifiers || []).filter((m: string) => m === 'times2').length;
-                    base *= Math.pow(2, times2);
-                    base += (p.modifiers || []).reduce((s: number, m: string) => m === 'plus2' ? s + 2 : m === 'plus4' ? s + 4 : s, 0);
-                    return base;
-                  })()} this round
-                  <span className="text-(--text-muted) ml-1">{p.cumulativeScore} pts</span>
+    body = (
+      <div className="mx-auto flex h-dvh w-full max-w-lg flex-col f7-table">
+        <header className="flex items-center gap-2 px-4 pb-2 pt-3">
+          <span className="text-xl" aria-hidden="true">🃏</span>
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold leading-tight text-(--text-primary)">
+              Flip 7
+              {chaos && (
+                <span className="ml-1.5 rounded bg-(--game-secondary)/15 px-1.5 py-0.5 align-middle text-[9px] font-bold uppercase tracking-wider text-(--game-secondary)">
+                  Chaos
                 </span>
-              </div>
-              <div className="flex gap-1 flex-wrap">
-                {/* Number cards sorted by value */}
-                {[...(p.visibleCards || [])].sort((a, b) => a - b).map((val, i) => (
-                  <div key={i} className="w-9 h-12 rounded-md flex flex-col items-center justify-center" style={{
-                    backgroundColor: val <= 2 ? '#fef3c7' : val <= 5 ? '#ecfdf5' : val <= 8 ? '#eff6ff' : val <= 10 ? '#f5f3ff' : '#fdf2f8',
-                    border: `1px solid ${val <= 2 ? '#f59e0b' : val <= 5 ? '#10b981' : val <= 8 ? '#3b82f6' : val <= 10 ? '#8b5cf6' : '#ec4899'}`,
-                  }}>
-                    <span className="text-sm font-bold" style={{ color: val <= 2 ? '#92400e' : val <= 5 ? '#065f46' : val <= 8 ? '#1e40af' : val <= 10 ? '#5b21b6' : '#9d174d' }}>{val}</span>
-                    <span className="text-[6px]" style={{ color: val <= 2 ? '#f59e0b' : val <= 5 ? '#10b981' : val <= 8 ? '#3b82f6' : val <= 10 ? '#8b5cf6' : '#ec4899' }}>pts</span>
-                  </div>
-                ))}
-                {/* Show bust card with red highlight */}
-                {p.roundStatus === 'busted' && p.bustCard !== null && p.bustCard !== undefined && (
-                  <div className="w-9 h-12 rounded-md flex flex-col items-center justify-center bg-red-100 border-2 border-red-500">
-                    <span className="text-sm font-bold text-red-600">{p.bustCard}</span>
-                    <span className="text-[6px] text-red-400">💀</span>
-                  </div>
-                )}
-                {(p.modifiers || []).map((mod, i) => (
-                  <div key={`m${i}`} className="w-9 h-12 rounded-md flex items-center justify-center bg-(--bg-elevated) border border-(--game-accent)/30">
-                    <span className="text-[10px] font-bold text-(--game-accent)">{mod === 'plus2' ? '+2' : mod === 'plus4' ? '+4' : '×2'}</span>
-                  </div>
-                ))}
-                {p.hasSecondChance && (
-                  <div className="w-9 h-12 rounded-md flex items-center justify-center bg-(--bg-elevated) border border-green-500/40">
-                    <span className="text-sm">💚</span>
-                  </div>
-                )}
-                {(p.visibleCards?.length ?? 0) === 0 && p.roundStatus === 'active' && (
-                  <span className="text-[9px] text-(--text-muted) py-1">No cards yet</span>
-                )}
-              </div>
+              )}
+            </h1>
+            <p className="truncate text-[11px] text-(--text-muted)">Round {state.round} · First to {settings.targetScore}</p>
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <DeckPile count={state.deckRemaining} />
+            <button
+              onClick={() => setShowRules(true)}
+              aria-label="How to play"
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-(--border) bg-(--bg-card) text-sm font-bold text-(--text-secondary) active:scale-95"
+            >
+              ?
+            </button>
+            {isHost && (
+              <button
+                onClick={handleEndGame}
+                className={`h-11 rounded-full px-3 text-[11px] font-semibold transition-all ${
+                  endGameConfirm ? 'bg-(--danger) text-white' : 'border border-(--border) text-(--text-muted)'
+                }`}
+              >
+                {endGameConfirm ? 'Confirm?' : 'End game'}
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="px-4 pb-2">
+          <div
+            className="flex min-h-[40px] items-center gap-2 rounded-xl border px-3 py-2"
+            style={{
+              borderColor: `color-mix(in srgb, ${bannerTone} 35%, transparent)`,
+              background: `color-mix(in srgb, ${bannerTone} 8%, transparent)`,
+            }}
+            aria-live="polite"
+          >
+            <p className="truncate text-sm font-semibold" style={{ color: bannerTone }}>{bannerText}</p>
+            {timer !== null && (
+              <span className={`ml-auto shrink-0 font-mono text-sm font-bold tabular-nums ${
+                timer <= 5 ? 'text-(--danger) animate-timer-urgent' : 'text-(--text-secondary)'
+              }`}>
+                {timer}s
+              </span>
+            )}
+          </div>
+          {timer !== null && timerTotal > 0 && (
+            <div className="mt-1.5">
+              <TimerBar seconds={timer} total={timerTotal} />
             </div>
-          );
-        })}
+          )}
+        </div>
+
+        <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pb-3">
+          {me && (
+            <MyHand
+              avatar={me.avatar}
+              totalScore={me.cumulativeScore}
+              targetScore={settings.targetScore}
+              cards={display.myCards.map(c => c.value)}
+              modifiers={display.myModifiers}
+              secondChances={display.mySecondChances}
+              status={display.myRoundStatus}
+              bustCard={displayMe?.bustCard ?? null}
+              isTurn={yourMove}
+              ready={iLocked}
+            />
+          )}
+          {others.length > 0 && (
+            <section aria-label="Other players">
+              <h2 className="mb-1.5 px-1 text-[10px] uppercase tracking-[0.15em] text-(--text-muted)">The table</h2>
+              <div className="space-y-1.5">
+                {others.map(p => (
+                  <OpponentRow
+                    key={p.id}
+                    player={p}
+                    isTurn={!chaos && !pendingAction && p.id === state.activePlayerId}
+                    ready={chaos && state.chaosSubmitted.includes(p.id)}
+                    picking={pendingAction?.drawerId === p.id}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+
+        <footer className="relative px-4 pt-2 f7-safe-bottom">
+          {toast && (
+            <div
+              key={toast.key}
+              role="status"
+              className="pointer-events-none absolute bottom-full left-1/2 mb-2 max-w-[90vw] -translate-x-1/2 truncate rounded-full border border-(--border-light) bg-(--bg-elevated) px-3.5 py-1.5 text-xs font-semibold text-(--text-primary) shadow-lg f7-toast"
+            >
+              {toast.text}
+            </div>
+          )}
+          {showButtons ? (
+            <div className="flex gap-3">
+              <button
+                onClick={chaos ? () => chaosChoice('stay') : stay}
+                disabled={buttonsDisabled}
+                className="f7-btn-stay min-h-[64px] flex-1 rounded-2xl py-2.5"
+              >
+                <span className="block text-base font-bold tracking-wide">STAY</span>
+                <span className="block text-[11px] text-(--text-secondary)">Bank {myScore}</span>
+              </button>
+              <button
+                onClick={chaos ? () => chaosChoice('hit') : hit}
+                disabled={buttonsDisabled}
+                className="f7-btn-hit min-h-[64px] flex-[1.4] rounded-2xl py-2.5"
+                style={{ '--f7-risk': riskTone } as CSSProperties}
+              >
+                <span className="block text-lg font-bold tracking-[0.08em]">HIT</span>
+                <span className="block text-[11px] font-semibold opacity-80">
+                  {protectedBySecondChance ? '💚 Second Chance ready' : `${riskPct}% bust risk`}
+                </span>
+              </button>
+            </div>
+          ) : (
+            <p className="flex min-h-[64px] items-center justify-center rounded-2xl border border-(--border) bg-(--bg-card)/80 px-4 text-center text-sm text-(--text-secondary)">
+              {statusLine}
+            </p>
+          )}
+        </footer>
+
+        {reveal?.kind === 'flip' && (
+          <FlipAnimation key={reveal.key} flips={reveal.flips} myId={myId} avatars={avatars} />
+        )}
+        {reveal?.kind === 'action' && (
+          <ActionAnimation key={reveal.key} action={reveal.action} myId={myId} />
+        )}
+        {showSheet && pendingAction && (
+          <ActionSheet
+            key={`${pendingAction.drawerId}-${pendingAction.cardKind}-${pendingAction.eligibleTargets.join(',')}`}
+            pending={pendingAction}
+            players={state.players}
+            myId={myId}
+            onSelect={chooseTarget}
+            secondsLeft={timer}
+            totalSeconds={timerTotal}
+          />
+        )}
       </div>
+    );
+  }
 
-      {/* Flip animation overlay — shows on top of everything (but not during pending actions) */}
-      {lastFlipEvent && !pendingAction && (
-        <FlipAnimation
-          key={flipKey}
-          card={lastFlipEvent.card}
-          result={lastFlipEvent.result}
-          playerName={lastFlipEvent.playerName}
-          isMe={lastFlipEvent.playerId === playerId}
-        />
+  return (
+    <div data-game="flip-7" className="flex flex-1 flex-col">
+      {body}
+      {showQuickRules && state.round === 1 && (phase === 'dealing' || phase === 'playing') && (
+        <QuickRules targetScore={settings.targetScore} yourMove={yourMove} onClose={closeQuickRules} />
       )}
-
-      {/* Action "attack" animation overlay (Freeze / Flip Three flying to target) */}
-      <ActionAnimation notification={actionNotification} myId={playerId || ''} />
-
-      {/* Full-screen frost reaction shown only to the player who just got frozen */}
-      <FrozenSelfOverlay triggerKey={frozenSelfKey} />
-
-      {/* Action sheet */}
-      {pendingAction && pendingAction.eligibleTargets.length > 0 && (
-        <ActionSheet
-          type="action"
-          cardKind={pendingAction.cardKind}
-          eligibleTargets={pendingAction.eligibleTargets}
-          players={players}
-          onSelect={useAction}
-          turnTimer={turnTimer}
-        />
-      )}
-      {pendingModifier && pendingModifier.eligibleTargets.length > 0 && (
-        <ActionSheet
-          type="modifier"
-          cardKind={pendingModifier.cardKind}
-          eligibleTargets={pendingModifier.eligibleTargets}
-          players={players}
-          onSelect={(targetId) => giveModifier(targetId)}
-          onKeep={() => giveModifier(null)}
-          turnTimer={turnTimer}
-        />
-      )}
-
-      {/* HIT / STAY buttons */}
-      {(isMyTurn || (settings.mode === 'chaos' && myRoundStatus === 'active' && !chaosSubmitted)) && !pendingAction && !pendingModifier && !flipSevenAchievedBy && myRoundStatus === 'active' && (
-        <div className="px-4 pb-4 pt-2 flex gap-3">
-          <button
-            onClick={settings.mode === 'chaos' ? () => chaosChoice('stay') : stay}
-            className="flex-1 py-4 rounded-xl font-semibold text-sm bg-(--bg-card) border border-(--border) text-(--text-secondary) active:scale-[0.97] transition-all"
-          >
-            🛡️ STAY
-          </button>
-          <button
-            onClick={settings.mode === 'chaos' ? () => chaosChoice('hit') : hit}
-            className={`flex-1 py-4 rounded-xl font-semibold text-sm active:scale-[0.97] transition-all ${hitDangerClass}`}
-          >
-            🃏 HIT
-          </button>
-        </div>
-      )}
-
-      {/* Chaos mode: waiting for others */}
-      {settings.mode === 'chaos' && myRoundStatus === 'active' && chaosSubmitted && (
-        <div className="text-center py-4 px-4">
-          <p className="text-sm text-(--text-muted) animate-soft-pulse">⏳ Waiting for others...</p>
-        </div>
-      )}
-
-      {/* Busted/stayed message */}
-      {dMyRoundStatus === 'busted' && (
-        <div className="text-center py-4 px-4">
-          <p className="text-sm text-(--text-muted)">💀 You busted — waiting for round to end</p>
-        </div>
-      )}
-      {(dMyRoundStatus === 'stayed' || dMyRoundStatus === 'frozen') && (
-        <div className="text-center py-4 px-4">
-          <p className="text-sm text-(--text-muted)">
-            {dMyRoundStatus === 'frozen' ? '❄️ You were frozen' : '✓ You stayed'} — watching others
-          </p>
-        </div>
-      )}
-
-      {/* Host end game button */}
-      {isHost && (
-        <div className="px-4 pb-4">
-          <button
-            onClick={handleEndGame}
-            className={`w-full py-2.5 rounded-xl text-xs transition-all ${
-              endGameConfirm
-                ? 'bg-(--danger) text-white'
-                : 'text-(--text-muted) border border-(--border)'
-            }`}
-          >
-            {endGameConfirm ? 'Tap again to end game' : 'End Game'}
-          </button>
-        </div>
-      )}
+      {showRules && <RulesSheet gameId="flip7" onClose={closeRules} />}
     </div>
   );
 }

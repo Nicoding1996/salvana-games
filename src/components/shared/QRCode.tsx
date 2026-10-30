@@ -26,6 +26,7 @@ export default function QRCode({ value, size = 160 }: Props) {
   if (!dataUrl) return null;
 
   return (
+    // eslint-disable-next-line @next/next/no-img-element -- generated data: URL; next/image can't optimize it
     <img
       src={dataUrl}
       alt={`QR code for ${value}`}

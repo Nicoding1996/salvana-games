@@ -14,13 +14,12 @@ interface Props {
   teamScores: Record<string, number>;
   playerId: string;
   roundNumber: number;
-  totalStoriesLeft: number;
 }
 
 export default function ResultPhase({
   voteResult, room, isHost,
   onNextRound, onEndGame,
-  teamScores, playerId, roundNumber, totalStoriesLeft,
+  teamScores, playerId, roundNumber,
 }: Props) {
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [showDetails, setShowDetails] = useState(false);

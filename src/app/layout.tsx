@@ -22,6 +22,9 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  // Tint the mobile browser UI to match the app background (--bg-primary)
+  themeColor: '#0a0a10',
+  colorScheme: 'dark',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,

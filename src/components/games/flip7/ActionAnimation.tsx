@@ -1,56 +1,61 @@
 'use client';
 
+import type { CSSProperties } from 'react';
+import type { Flip7ActionEvent } from '@/types/games/flip7';
+import { ACTION_CARD_LABELS } from '@/types/games/flip7';
+
 interface ActionAnimationProps {
-  notification: {
-    type: 'freeze' | 'flipThree';
-    byId: string;
-    byName: string;
-    targetId: string;
-    targetName: string;
-  } | null;
+  action: Flip7ActionEvent;
   myId: string;
 }
 
-// Plays a one-shot "attack flying to target" effect when a Freeze or Flip Three
-// is used. The root element is keyed on actor+target+type so each new action
-// remounts and replays the CSS animations. The icon/burst fade themselves out
-// via `forwards` keyframes; the persistent toast in Flip7Game keeps the label.
-export default function ActionAnimation({ notification, myId }: ActionAnimationProps) {
-  if (!notification) return null;
+// One-shot "attack" when a Freeze or Flip Three is played: the icon flies in,
+// an impact ring bursts, and a label says who hit whom. The player who got hit
+// also sees a vignette in the card's color around the screen edges.
+export default function ActionAnimation({ action, myId }: ActionAnimationProps) {
+  const info = ACTION_CARD_LABELS[action.type];
+  const hitsMe = action.targetId === myId;
+  const isSelf = action.byId === action.targetId;
+  const by = action.byId === myId ? 'You' : action.byName;
+  const target = isSelf
+    ? (action.byId === myId ? 'yourself' : 'themselves')
+    : (hitsMe ? 'you' : action.targetName);
+  const text = action.type === 'freeze'
+    ? `${by} froze ${target}!`
+    : `${by} made ${target} flip three!`;
 
-  const isFreeze = notification.type === 'freeze';
-  const icon = isFreeze ? '❄️' : '⚡';
-  const accent = isFreeze ? '#60a5fa' : '#fbbf24';
-
-  const isSelf = notification.byId === notification.targetId;
-  const byLabel = notification.byId === myId ? 'You' : notification.byName;
-  const targetLabel = notification.targetId === myId ? 'you' : notification.targetName;
-  const verb = isFreeze ? 'froze' : 'zapped';
-  // Self-target: "You froze yourself!" / "Alice froze themselves!"
-  const selfTargetLabel = notification.byId === myId ? 'yourself' : 'themselves';
-
-  const key = `${notification.byId}-${notification.targetId}-${notification.type}`;
+  const ink = { '--f7-ink': info.color } as CSSProperties;
 
   return (
-    <div key={key} className="fixed inset-0 z-50 flex flex-col items-center justify-center pointer-events-none">
-      {/* Impact burst behind the icon */}
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center pointer-events-none" aria-live="polite">
+      <div className="f7-reveal-backdrop" />
+      {hitsMe && <div className="f7-self-hit" style={ink} />}
+
       <div className="relative flex items-center justify-center">
         <div
-          className="absolute w-24 h-24 rounded-full flip7-impact-burst"
-          style={{ backgroundColor: `${accent}40`, border: `2px solid ${accent}` }}
+          className="absolute h-28 w-28 rounded-full flip7-impact-burst"
+          style={{ background: `color-mix(in srgb, ${info.color} 25%, transparent)`, boxShadow: `0 0 0 2px ${info.color}` }}
         />
-        <div className="text-6xl flip7-action-fly" style={{ filter: `drop-shadow(0 0 12px ${accent})` }}>
-          {icon}
+        <div className="text-7xl flip7-action-fly" style={{ filter: `drop-shadow(0 0 14px ${info.color})` }} aria-hidden="true">
+          {info.icon}
         </div>
       </div>
 
-      {/* Label */}
-      <div
-        className="mt-6 px-4 py-2 rounded-full text-sm font-bold flip7-label-out"
-        style={{ backgroundColor: `${accent}1f`, color: accent, border: `1px solid ${accent}55` }}
+      <p
+        className="relative mt-7 rounded-full px-4 py-2 text-sm font-bold flip7-label-out"
+        style={{
+          color: info.color,
+          background: `color-mix(in srgb, ${info.color} 14%, var(--bg-card))`,
+          boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${info.color} 40%, transparent)`,
+        }}
       >
-        {byLabel} {verb} {isSelf ? selfTargetLabel : targetLabel}!
-      </div>
+        {text}
+      </p>
+      {action.auto && (
+        <p className="relative mt-2 text-[11px] text-(--text-secondary) flip7-label-out">
+          Time ran out, so the target was picked at random
+        </p>
+      )}
     </div>
   );
 }

@@ -38,9 +38,9 @@
   --danger: #f87171;
   --danger-dim: rgba(248, 113, 113, 0.10);
 
-  /* Fonts */
-  --font-heading: var(--font-heading, 'Space Grotesk', system-ui, sans-serif);
-  --font-body: var(--font-body, 'DM Sans', system-ui, sans-serif);
+  /* Fonts: --font-heading and --font-body are defined by next/font on <html>
+     (see layout.tsx). Don't redeclare them here: a self-referencing
+     declaration is a cycle and would make both fonts invalid. */
 }
 
 * { -webkit-tap-highlight-color: transparent; }
@@ -48,7 +48,7 @@
 body {
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: var(--font-body);
+  font-family: var(--font-body, system-ui, sans-serif);
   min-height: 100dvh;
   overscroll-behavior: none;
 }
@@ -84,10 +84,16 @@ body {
 
 /* Headings use the display font */
 h1, h2, h3 {
-  font-family: var(--font-heading);
+  font-family: var(--font-heading, system-ui, sans-serif);
 }
 
+/* Inputs must render at ≥16px or iOS zooms on focus */
 input, textarea, select { font-size: 16px !important; }
+/* Room-code inputs are intentionally larger (still ≥16px) */
+input.input-code { font-size: 26px !important; }
+
+/* Display font for non-heading elements (game names inside buttons, CTAs) */
+.font-heading { font-family: var(--font-heading, system-ui, sans-serif); }
 
 /* ============================================
    Ambient Particles — floating embers on home page
@@ -159,55 +165,155 @@ input, textarea, select { font-size: 16px !important; }
 }
 
 /* ============================================
-   Featured Game Card (Home page hero)
+   Home — hero card fan
+   Each card sets --card-accent, --rot, --lift, --deal-delay, --float-delay inline.
    ============================================ */
 
-.featured-game-card {
-  background: var(--bg-elevated);
+.hero-fan {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  height: 112px;
+  padding-top: 12px;
+}
+
+/* Warm "lamp over the table" glow behind the cards */
+.hero-fan::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 280px;
+  height: 90px;
+  transform: translateX(-50%);
+  background: radial-gradient(closest-side, rgba(240, 160, 80, 0.16), transparent);
+  pointer-events: none;
+}
+
+.hero-card {
+  position: relative;
+  width: 60px;
+  height: 84px;
+  margin-inline: calc(var(--overlap, 6px) * -1);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  line-height: 1;
+  background:
+    radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, var(--card-accent) 32%, transparent) 0%, transparent 70%),
+    linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
+  border: 1px solid color-mix(in srgb, var(--card-accent) 45%, var(--border));
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.5),
+    0 0 24px color-mix(in srgb, var(--card-accent) 16%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  rotate: var(--rot, 0deg);
+  translate: 0 var(--lift, 0px);
+  transform-origin: 50% 100%;
+  animation:
+    heroCardDeal 0.7s cubic-bezier(0.22, 1, 0.36, 1) backwards,
+    heroCardFloat 5s ease-in-out infinite;
+  animation-delay: var(--deal-delay, 0s), var(--float-delay, 0.8s);
+}
+
+@keyframes heroCardDeal {
+  from { opacity: 0; transform: translateY(28px) scale(0.9); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes heroCardFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.brand-glow { text-shadow: 0 0 28px rgba(240, 160, 80, 0.35); }
+
+/* Primary call-to-action glow (brand amber) */
+.cta-glow {
+  box-shadow:
+    0 10px 30px -10px rgba(240, 160, 80, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* Create / join form panel */
+.home-panel {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--bg-elevated) 88%, transparent),
+    color-mix(in srgb, var(--bg-card) 88%, transparent));
   border: 1px solid var(--border-light);
   box-shadow:
-    0 4px 24px rgba(0, 0, 0, 0.2),
-    0 0 40px rgba(240, 160, 80, 0.03);
+    0 24px 48px -24px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 /* ============================================
-   Game Card Styles (Lobby & Home)
+   Game cards (home showcase + lobby selector)
+   Set --card-accent inline from the game registry.
    ============================================ */
 
-.game-card {
-  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(23, 21, 37, 0.9) 100%);
-  transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+.accent-surface {
+  background:
+    radial-gradient(140% 120% at 0% 0%, color-mix(in srgb, var(--card-accent) 14%, transparent) 0%, transparent 55%),
+    var(--bg-card);
 }
 
-.game-card:hover:not(:disabled) {
-  background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(31, 28, 50, 0.9) 100%);
-  transform: translateY(-1px);
+.accent-topline {
+  position: relative;
+  overflow: hidden;
 }
 
-.game-card:active:not(:disabled) {
-  transform: scale(0.98) translateY(0);
+.accent-topline::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--card-accent), transparent);
+  opacity: 0.7;
 }
 
-.game-card-selected {
-  background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(31, 28, 50, 0.95) 100%);
+/* Rounded emoji tile tinted with the game accent */
+.icon-tile {
+  background: color-mix(in srgb, var(--card-accent) 16%, var(--bg-elevated));
+  border: 1px solid color-mix(in srgb, var(--card-accent) 30%, transparent);
+}
+
+/* Accent-colored text, lightened so dark accents (poker green) stay readable */
+.accent-text { color: color-mix(in srgb, var(--card-accent) 72%, var(--text-primary)); }
+
+.showcase-card {
+  transition: border-color 0.2s ease, transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.showcase-card:hover { border-color: color-mix(in srgb, var(--card-accent) 40%, var(--border)); }
+.showcase-card:active { transform: scale(0.985); }
+
+/* Lobby game picker tiles */
+.game-tile {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  transition:
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.game-tile:hover { border-color: var(--border-light); }
+.game-tile:active { transform: scale(0.97); }
+
+.game-tile[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--card-accent) 65%, transparent);
+  background:
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--card-accent) 22%, transparent) 0%, transparent 70%),
+    var(--bg-elevated);
   box-shadow:
-    0 0 20px color-mix(in srgb, var(--card-accent, var(--brand)) 12%, transparent),
-    0 4px 12px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  transform: translateY(-1px);
-}
-
-/* Game selector pills */
-.game-pill {
-  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.game-pill:active:not(:disabled) {
-  transform: scale(0.95);
-}
-
-.game-pill-active {
-  box-shadow: 0 0 12px rgba(240, 160, 80, 0.08);
+    0 0 0 1px color-mix(in srgb, var(--card-accent) 35%, transparent),
+    0 8px 24px -8px color-mix(in srgb, var(--card-accent) 40%, transparent);
 }
 
 /* ============================================
@@ -233,50 +339,14 @@ input, textarea, select { font-size: 16px !important; }
   opacity: 0.5;
 }
 
-/* Game buttons */
-.btn-game {
-  background: var(--game-accent);
-  color: var(--bg-primary);
-  font-family: var(--font-heading);
-  font-weight: 600;
-  border-radius: 12px;
-  transition: all 0.15s ease;
-}
-
-.btn-game:active {
-  transform: scale(0.97);
-}
-
-.btn-game:disabled {
-  opacity: 0.3;
-}
-
-/* Settings pill buttons */
-.pill {
-  border-radius: 10px;
-  transition: all 0.15s ease;
-  font-family: var(--font-body);
-}
-
-.pill-active {
-  background: var(--brand);
-  color: var(--bg-primary);
-  font-weight: 600;
-}
-
-.pill-inactive {
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-}
-
 /* ============================================
    Animations
    ============================================ */
 
+/* Opacity only — also used on full-screen backdrops */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes slideUp {
@@ -339,59 +409,6 @@ input, textarea, select { font-size: 16px !important; }
   100% { transform: translateY(0); }
 }
 .rules-sheet-enter { animation: rulesSheetEnter 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
-
-/* ============================================
-   Game Preview Animations (Lobby card expansion)
-   ============================================ */
-
-.game-preview-container {
-  position: relative;
-}
-
-/* Gentle float for preview elements */
-@keyframes previewFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
-}
-
-.game-preview-float {
-  position: relative;
-  animation: previewFloat 2.5s ease-in-out infinite;
-}
-
-/* Dice wobble */
-@keyframes previewDiceWobble {
-  0% { transform: rotate(0deg) scale(0.8); opacity: 0; }
-  40% { transform: rotate(-5deg) scale(1.05); opacity: 1; }
-  60% { transform: rotate(3deg) scale(0.98); }
-  100% { transform: rotate(0deg) scale(1); opacity: 1; }
-}
-
-.game-preview-dice {
-  opacity: 0;
-  animation: previewDiceWobble 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-}
-
-/* Card flip-in */
-@keyframes previewCardFlip {
-  0% { transform: rotateY(90deg) scale(0.8); opacity: 0; }
-  100% { transform: rotateY(0deg) scale(1); opacity: 1; }
-}
-
-.game-preview-card {
-  opacity: 0;
-  animation: previewCardFlip 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-}
-
-/* Hit pulse for battleship */
-@keyframes previewHitPulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.15); }
-}
-
-.game-preview-hit {
-  animation: previewHitPulse 1.5s ease-in-out infinite;
-}
 
 /* Confetti */
 .confetti-container {
@@ -631,31 +648,321 @@ input, textarea, select { font-size: 16px !important; }
   --game-accent-strong: #1e6b3a;
   --game-secondary: #d4af37;
   --game-secondary-dim: rgba(212, 175, 55, 0.10);
+
+  /* Table: green felt under a warm overhead lamp, walnut rail */
+  --poker-felt: #23784b;
+  --poker-felt-deep: #0d3a23;
+  --poker-rail: #2c1c16;
+  --poker-rail-edge: #5a3a2a;
+  --poker-line: rgba(212, 175, 55, 0.26);
+  --poker-plate: rgba(10, 10, 16, 0.84);
+  --poker-ring-track: rgba(255, 255, 255, 0.12);
+
+  /* Cards */
+  --poker-card-face: #f6f1e6;
+  --poker-card-edge: #d6ccb8;
+  --poker-card-red: #c3343f;
+  --poker-card-black: #1c1a25;
+  --poker-card-back: #6b1c28;
+  --poker-card-back-light: #8f2b3a;
+
+  /* Chips + dealer button */
+  --poker-chip: #d4af37;
+  --poker-chip-edge: #f4e5a9;
+  --poker-chip-dark: #8c6c17;
+  --poker-button-face: #f2eee4;
 }
 
-/* ============================================
-   Poker — Animations
-   ============================================ */
+/* ---- Table ---- */
 
-@keyframes flipIn {
-  0% { transform: rotateY(90deg); opacity: 0; }
-  100% { transform: rotateY(0deg); opacity: 1; }
+.poker-felt {
+  position: absolute;
+  inset: 12% 4% 3% 4%;
+  border-radius: 48% / 44%;
+  background:
+    radial-gradient(ellipse 58% 42% at 50% 42%, rgba(255, 224, 160, 0.14), transparent 72%),
+    radial-gradient(ellipse 90% 85% at 50% 48%, var(--poker-felt) 0%, var(--poker-felt-deep) 100%);
+  box-shadow:
+    0 0 0 7px var(--poker-rail),
+    0 0 0 8px var(--poker-rail-edge),
+    0 0 0 10px rgba(0, 0, 0, 0.45),
+    0 24px 50px rgba(0, 0, 0, 0.6),
+    inset 0 0 46px rgba(0, 0, 0, 0.55);
 }
 
-@keyframes slideUp {
-  0% { transform: translateY(20px); opacity: 0; }
+/* Gold betting line */
+.poker-felt::before {
+  content: '';
+  position: absolute;
+  inset: 8%;
+  border-radius: inherit;
+  border: 1px solid var(--poker-line);
+  pointer-events: none;
+}
+
+/* Felt grain */
+.poker-felt::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 3px 3px;
+  pointer-events: none;
+}
+
+.poker-felt-mark {
+  font-family: var(--font-heading, system-ui, sans-serif);
+  letter-spacing: 0.35em;
+  color: rgba(212, 175, 55, 0.16);
+}
+
+.poker-slot {
+  border: 1.5px dashed rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+}
+
+/* ---- Cards ---- */
+
+.poker-card {
+  position: relative;
+  flex-shrink: 0;
+  user-select: none;
+  font-family: var(--font-heading, system-ui, sans-serif);
+  transition: transform 0.3s ease, filter 0.3s ease, box-shadow 0.3s ease;
+}
+
+.poker-card-face {
+  background: linear-gradient(165deg, #fffdf8 0%, var(--poker-card-face) 55%, #e9e1cf 100%);
+  border: 1px solid var(--poker-card-edge);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.poker-card-back {
+  background:
+    repeating-linear-gradient(45deg, transparent 0 5px, rgba(255, 255, 255, 0.08) 5px 6px),
+    repeating-linear-gradient(-45deg, transparent 0 5px, rgba(255, 255, 255, 0.08) 5px 6px),
+    linear-gradient(160deg, var(--poker-card-back-light), var(--poker-card-back));
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  box-shadow:
+    inset 0 0 0 2px var(--poker-card-face),
+    inset 0 0 0 3px rgba(0, 0, 0, 0.25),
+    0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.poker-card-back::after {
+  content: '♠';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(212, 175, 55, 0.45);
+  font-size: 0.9em;
+}
+
+.poker-card-win {
+  transform: translateY(-4px);
+  box-shadow: 0 0 0 2px var(--game-secondary), 0 0 18px rgba(212, 175, 55, 0.6);
+  z-index: 1;
+}
+
+.poker-card-dim { filter: brightness(0.5) saturate(0.5); }
+
+/* Mini face-down cards held by opponents */
+.poker-mini-back {
+  width: 14px;
+  height: 20px;
+  border-radius: 3px;
+  background: linear-gradient(160deg, var(--poker-card-back-light), var(--poker-card-back));
+  box-shadow: inset 0 0 0 1.5px var(--poker-card-face), 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* ---- Chips, plates, buttons ---- */
+
+.poker-chip {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, var(--poker-chip) 0 40%, transparent 42%),
+    repeating-conic-gradient(var(--poker-chip-edge) 0 30deg, var(--poker-chip-dark) 30deg 60deg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.poker-chip-lg { width: 18px; height: 18px; }
+
+.poker-plate {
+  background: var(--poker-plate);
+  border: 1px solid var(--border-light);
+  border-radius: 9px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+}
+
+.poker-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px 1px 4px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.poker-dealer-btn {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffffff, var(--poker-button-face));
+  color: var(--poker-card-black);
+  font: 700 10px/1 var(--font-heading, system-ui, sans-serif);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 0 0 1.5px rgba(0, 0, 0, 0.15);
+}
+
+.poker-seat-avatar {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  font-size: 22px;
+  background: radial-gradient(circle at 50% 35%, var(--bg-hover), var(--bg-card));
+  border: 2px solid var(--border-light);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
+  transition: border-color 0.3s ease, filter 0.3s ease;
+}
+
+.poker-seat-active .poker-seat-avatar {
+  border-color: var(--game-secondary);
+  animation: pokerTurnGlow 1.6s ease-in-out infinite;
+}
+
+.poker-seat-winner .poker-seat-avatar {
+  border-color: var(--game-secondary);
+  animation: pokerWinnerGlow 1.1s ease-in-out infinite;
+}
+
+.poker-seat-out .poker-seat-avatar { filter: grayscale(1) brightness(0.7); }
+
+.poker-btn-raise {
+  background: linear-gradient(180deg, #e6c45a 0%, var(--game-secondary) 55%, #b8932a 100%);
+  color: var(--bg-primary);
+}
+
+.poker-btn-call {
+  background: linear-gradient(180deg, #3aa463 0%, var(--game-accent) 60%, var(--game-accent-strong) 100%);
+  color: var(--text-primary);
+}
+
+.poker-range {
+  accent-color: var(--game-secondary);
+}
+
+/* ---- Animations ---- */
+
+@keyframes pokerFlipIn {
+  0% { transform: perspective(500px) rotateY(90deg) scale(0.9); opacity: 0; }
+  60% { transform: perspective(500px) rotateY(-10deg) scale(1.03); opacity: 1; }
+  100% { transform: perspective(500px) rotateY(0deg) scale(1); opacity: 1; }
+}
+
+@keyframes pokerDealIn {
+  0% { transform: translate(0, -140px) rotate(-25deg) scale(0.55); opacity: 0; }
+  70% { opacity: 1; }
+  100% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
+}
+
+@keyframes pokerMiniDeal {
+  0% { transform: translateY(30px) scale(0.4); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@keyframes pokerPop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.16); }
+  100% { transform: scale(1); }
+}
+
+@keyframes pokerFloatUp {
+  0% { transform: translateY(8px) scale(0.8); opacity: 0; }
+  15% { transform: translateY(0) scale(1.1); opacity: 1; }
+  25% { transform: translateY(0) scale(1); }
+  80% { opacity: 1; }
+  100% { transform: translateY(-14px); opacity: 0; }
+}
+
+@keyframes pokerReaction {
+  0% { transform: translateY(8px) scale(0.4); opacity: 0; }
+  18% { transform: translateY(0) scale(1.2); opacity: 1; }
+  30% { transform: translateY(0) scale(1); }
+  80% { opacity: 1; }
+  100% { transform: translateY(-20px) scale(1); opacity: 0; }
+}
+
+@keyframes pokerBannerIn {
+  0% { transform: scale(0.85) translateY(6px); opacity: 0; }
+  60% { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+@keyframes pokerFeedIn {
+  0% { transform: translateY(4px); opacity: 0; }
   100% { transform: translateY(0); opacity: 1; }
 }
 
-@keyframes fadeIn {
-  0% { opacity: 0; }
-  100% { opacity: 1; }
+@keyframes pokerSheetIn {
+  0% { transform: translateY(100%); }
+  100% { transform: translateY(0); }
 }
 
-@keyframes celebrate {
-  0% { transform: scale(0.5); opacity: 0; }
-  60% { transform: scale(1.1); }
-  100% { transform: scale(1); opacity: 1; }
+@keyframes pokerDrain {
+  0% { transform: scaleX(1); }
+  100% { transform: scaleX(0); }
+}
+
+@keyframes pokerTurnGlow {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.3), 0 0 10px rgba(212, 175, 55, 0.25); }
+  50% { box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.6), 0 0 22px rgba(212, 175, 55, 0.5); }
+}
+
+@keyframes pokerWinnerGlow {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.5), 0 0 16px rgba(212, 175, 55, 0.45); }
+  50% { box-shadow: 0 0 0 5px rgba(212, 175, 55, 0.8), 0 0 30px rgba(212, 175, 55, 0.7); }
+}
+
+@keyframes pokerAllInPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* backwards fill: hidden during the delay, then the element's own transform applies */
+.animate-poker-flip-in { animation: pokerFlipIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.animate-poker-deal { animation: pokerDealIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.animate-poker-mini-deal { animation: pokerMiniDeal 0.35s ease-out backwards; }
+.animate-poker-pop { animation: pokerPop 0.4s ease-out; }
+.animate-poker-float-up { animation: pokerFloatUp 2.2s ease-out forwards; }
+.animate-poker-reaction { animation: pokerReaction 2.6s ease-out forwards; }
+.animate-poker-banner { animation: pokerBannerIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.animate-poker-feed { animation: pokerFeedIn 0.25s ease-out; }
+.animate-poker-sheet { animation: pokerSheetIn 0.25s cubic-bezier(0.22, 1, 0.36, 1); }
+.animate-poker-allin { animation: pokerAllInPulse 1.2s ease-in-out infinite; }
+.poker-drain { transform-origin: left center; animation-name: pokerDrain; animation-timing-function: linear; animation-fill-mode: forwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-game="poker"] *,
+  [data-game="poker"] *::before,
+  [data-game="poker"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 
@@ -669,75 +976,483 @@ input, textarea, select { font-size: 16px !important; }
   --game-accent-strong: #7cc622;
   --game-secondary: #f472b6;
   --game-secondary-dim: rgba(244, 114, 182, 0.10);
+
+  /* Card stock */
+  --f7-card-face: #fbf6ea;
+  --f7-card-face-2: #efe4cc;
+  --f7-card-shadow: rgba(8, 6, 16, 0.45);
+  --f7-special-face: #261f3d;
+  --f7-special-face-2: #130f1f;
+  --f7-bust-ink: #b91c1c;
+
+  /* Number inks: one hue per value, dark enough to read on the card stock */
+  --f7-n0: #57534e;
+  --f7-n1: #6d28d9;
+  --f7-n2: #4338ca;
+  --f7-n3: #1d4ed8;
+  --f7-n4: #0369a1;
+  --f7-n5: #0f766e;
+  --f7-n6: #15803d;
+  --f7-n7: #4d7c0f;
+  --f7-n8: #a16207;
+  --f7-n9: #b45309;
+  --f7-n10: #c2410c;
+  --f7-n11: #b91c1c;
+  --f7-n12: #be185d;
+
+  /* Special cards */
+  --f7-freeze: #60a5fa;
+  --f7-flip3: #fbbf24;
+  --f7-second: #4ade80;
+  --f7-plus: #a3e635;
+  --f7-times: #f472b6;
+}
+
+/* Component classes live in the components layer so Tailwind utilities
+   (absolute, bg-*, border-*) can still override them where needed. */
+@layer components {
+  /* Panel with a lime top-line accent (same pattern as .dice-card / .battleship-card) */
+  .flip7-card {
+    /* Opaque base so the panel also works as a sheet over other content */
+    background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(31, 28, 50, 0.8) 100%), var(--bg-card);
+    border: 1px solid rgba(163, 230, 53, 0.15);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .flip7-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--game-accent), transparent);
+    opacity: 0.5;
+  }
+
+  /* Playing-table backdrop: lime haze from the top, pink from the bottom */
+  .f7-table {
+    background:
+      radial-gradient(ellipse 90% 40% at 50% -5%, rgba(163, 230, 53, 0.07) 0%, transparent 60%),
+      radial-gradient(ellipse 70% 35% at 50% 105%, rgba(244, 114, 182, 0.07) 0%, transparent 60%);
+  }
+
+  .f7-safe-bottom { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+
+  /* ---- Cards ---- */
+
+  .f7-card {
+    --f7-ink: var(--f7-n0);
+    position: relative;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--f7-ink);
+    font-family: var(--font-heading, system-ui, sans-serif);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+    user-select: none;
+    -webkit-user-select: none;
+    background:
+      radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--f7-ink) 12%, transparent) 0 36%, transparent 37%),
+      linear-gradient(165deg, var(--f7-card-face) 0%, var(--f7-card-face-2) 100%);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.7),
+      inset 0 0 0 3px var(--f7-card-face),
+      inset 0 0 0 4px color-mix(in srgb, var(--f7-ink) 42%, transparent),
+      0 2px 6px var(--f7-card-shadow);
+  }
+
+  .f7-card-xs {
+    width: 22px;
+    height: 30px;
+    border-radius: 5px;
+    font-size: 13px;
+    background: linear-gradient(165deg, var(--f7-card-face) 0%, var(--f7-card-face-2) 100%);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--f7-ink) 45%, transparent),
+      0 1px 2px var(--f7-card-shadow);
+  }
+  .f7-card-sm { width: 32px; height: 44px; border-radius: 7px; font-size: 18px; }
+  .f7-card-md { width: 44px; height: 62px; border-radius: 9px; font-size: 26px; }
+  .f7-card-lg {
+    width: 96px;
+    height: 134px;
+    border-radius: 14px;
+    font-size: 58px;
+    box-shadow:
+      inset 0 0 0 1.5px rgba(255, 255, 255, 0.75),
+      inset 0 0 0 6px var(--f7-card-face),
+      inset 0 0 0 7.5px color-mix(in srgb, var(--f7-ink) 45%, transparent),
+      0 14px 34px var(--f7-card-shadow);
+  }
+
+  /* Corner indices (md / lg only) */
+  .f7-idx {
+    position: absolute;
+    top: 9%;
+    left: 13%;
+    font-size: 0.3em;
+    letter-spacing: 0;
+  }
+  .f7-idx-br {
+    top: auto;
+    left: auto;
+    bottom: 9%;
+    right: 13%;
+    transform: rotate(180deg);
+  }
+
+  /* The duplicate that busted a hand: blush face with a strike-through */
+  .f7-card-bust {
+    background: linear-gradient(165deg, #fff1f1 0%, #f9cfcf 100%);
+  }
+  .f7-card-bust::after {
+    content: '';
+    position: absolute;
+    left: 12%;
+    right: 12%;
+    top: 50%;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--f7-bust-ink);
+    transform: rotate(-38deg);
+  }
+
+  /* Action and modifier cards: dark face with a glow in the card's color */
+  .f7-card-special {
+    flex-direction: column;
+    gap: 0.16em;
+    text-shadow: 0 0 12px color-mix(in srgb, var(--f7-ink) 60%, transparent);
+    background:
+      radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--f7-ink) 26%, transparent) 0 38%, transparent 39%),
+      linear-gradient(165deg, var(--f7-special-face) 0%, var(--f7-special-face-2) 100%);
+    box-shadow:
+      inset 0 0 0 1.5px color-mix(in srgb, var(--f7-ink) 75%, transparent),
+      inset 0 0 0 4px var(--f7-special-face-2),
+      inset 0 0 0 5px color-mix(in srgb, var(--f7-ink) 28%, transparent),
+      0 0 18px color-mix(in srgb, var(--f7-ink) 28%, transparent),
+      0 2px 6px var(--f7-card-shadow);
+  }
+  .f7-glyph { font-size: 0.74em; line-height: 1; text-shadow: none; }
+  .f7-special-name {
+    font-family: var(--font-body, system-ui, sans-serif);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  /* Card back: cross-hatched lime / pink with a "7" medallion */
+  .f7-card-back {
+    background:
+      radial-gradient(circle at 50% 50%, var(--f7-special-face-2) 0 26%, transparent 27%),
+      repeating-linear-gradient(45deg, rgba(163, 230, 53, 0.16) 0 4px, transparent 4px 9px),
+      repeating-linear-gradient(-45deg, rgba(244, 114, 182, 0.14) 0 4px, transparent 4px 9px),
+      linear-gradient(165deg, #2c2349 0%, #16112a 100%);
+    box-shadow:
+      inset 0 0 0 2px var(--f7-card-face),
+      inset 0 0 0 5px #16112a,
+      inset 0 0 0 6px rgba(163, 230, 53, 0.45),
+      0 6px 18px var(--f7-card-shadow);
+    text-shadow: none;
+  }
+  .f7-card-back::after {
+    content: '7';
+    font-size: 0.6em;
+    color: var(--game-accent);
+    text-shadow: 0.06em 0.06em 0 var(--game-secondary), 0 0 12px rgba(163, 230, 53, 0.55);
+  }
+  .f7-card-back.f7-card-xs {
+    box-shadow: inset 0 0 0 1.5px var(--f7-card-face), 0 1px 2px var(--f7-card-shadow);
+  }
+
+  /* Modifier / Second Chance chips */
+  .f7-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 22px;
+    min-width: 28px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-family: var(--font-heading, system-ui, sans-serif);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    color: var(--f7-ink);
+    background: color-mix(in srgb, var(--f7-ink) 14%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--f7-ink) 45%, transparent);
+  }
+  .f7-chip-sm { height: 18px; min-width: 22px; padding: 0 5px; font-size: 10px; }
+
+  /* Flip 7 progress pips (unique numbers collected) */
+  .f7-pips { display: inline-flex; align-items: center; gap: 3px; }
+  .f7-pip {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--border-light);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+  }
+  .f7-pip-on { background: var(--game-accent); box-shadow: 0 0 6px rgba(163, 230, 53, 0.55); }
+  .f7-pips-hot .f7-pip-on { animation: f7PipHot 1.1s ease-in-out infinite; }
+
+  /* Busted hands: everything but the bust card fades out */
+  .f7-busted .f7-card:not(.f7-card-bust),
+  .f7-busted .f7-chip {
+    filter: grayscale(0.85);
+    opacity: 0.45;
+  }
+
+  /* ---- Buttons ---- */
+
+  .f7-btn-hit {
+    --f7-risk: var(--game-accent);
+    color: var(--bg-primary);
+    font-family: var(--font-heading, system-ui, sans-serif);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--f7-risk) 80%, white) 0%, var(--f7-risk) 100%);
+    box-shadow:
+      0 8px 22px color-mix(in srgb, var(--f7-risk) 32%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    transition: transform 0.12s ease, box-shadow 0.3s ease;
+  }
+  .f7-btn-stay {
+    color: var(--text-primary);
+    font-family: var(--font-heading, system-ui, sans-serif);
+    background: linear-gradient(180deg, var(--bg-hover) 0%, var(--bg-elevated) 100%);
+    box-shadow: inset 0 0 0 1px var(--border-light), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    transition: transform 0.12s ease;
+  }
+  .f7-btn-hit:active:not(:disabled),
+  .f7-btn-stay:active:not(:disabled) { transform: scale(0.97); }
+  .f7-btn-hit:disabled,
+  .f7-btn-stay:disabled { opacity: 0.55; }
+
+  /* ---- Hand animations ---- */
+
+  .f7-land { animation: f7CardLand 0.42s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .f7-bust-row { animation: f7BustRow 0.5s ease-out; }
+
+  /* Active turn glow ring (subtle breathing) */
+  .flip7-turn-glow { animation: flip7TurnPulse 1.8s ease-in-out infinite; }
+
+  /* Frost for frozen players (persistent) */
+  .flip7-frost {
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.18), rgba(191, 219, 254, 0.10));
+    border: 1px solid rgba(96, 165, 250, 0.45) !important;
+    animation: flip7FrostIn 0.5s ease-out forwards;
+  }
+
+  /* ---- Flip reveal (3D card flip) ---- */
+
+  .f7-reveal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 75% 55% at 50% 50%, rgba(10, 10, 16, 0.78) 0%, rgba(10, 10, 16, 0.45) 65%, rgba(10, 10, 16, 0.15) 100%);
+    animation: f7FadeIn 0.18s ease-out both;
+  }
+  /* Fade the whole overlay out at the end (delay set inline per reveal) */
+  .f7-reveal-out { animation: f7RevealOut 0.24s ease-in forwards; }
+
+  .f7-flip-stage {
+    position: relative;
+    perspective: 1000px;
+    animation: f7FadeIn 0.15s ease-out var(--f7-delay, 0ms) both;
+  }
+  .f7-flip3d {
+    position: relative;
+    transform-style: preserve-3d;
+    animation: f7FlipReveal 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) var(--f7-delay, 0ms) both;
+  }
+  .f7-flip3d > .f7-face,
+  .f7-flip3d > .f7-back {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+  .f7-flip3d > .f7-back {
+    position: absolute;
+    inset: 0;
+    transform: rotateY(180deg);
+  }
+
+  /* Result glow behind the revealed card */
+  .f7-ring {
+    position: absolute;
+    inset: -3px;
+    border-radius: 17px;
+    pointer-events: none;
+    opacity: 0;
+    animation: f7FadeIn 0.45s ease-out calc(var(--f7-delay, 0ms) + 600ms) forwards;
+  }
+  .f7-ring-tight { inset: -2px; border-radius: 11px; }
+  .f7-ring-safe { box-shadow: 0 0 0 2px rgba(163, 230, 53, 0.7), 0 0 30px rgba(163, 230, 53, 0.45); }
+  .f7-ring-bust { box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.95), 0 0 38px rgba(248, 113, 113, 0.6); }
+  .f7-ring-second { box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.9), 0 0 38px rgba(74, 222, 128, 0.55); }
+  .f7-ring-seven {
+    inset: -14px;
+    background: conic-gradient(from 0deg, #a3e635, #f472b6, #60a5fa, #fbbf24, #a3e635);
+    filter: blur(12px);
+    animation:
+      f7FadeIn 0.45s ease-out calc(var(--f7-delay, 0ms) + 600ms) forwards,
+      f7Spin 2.2s linear infinite;
+  }
+
+  /* BUST / SAVED stamp slammed onto the card */
+  .f7-stamp {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-family: var(--font-heading, system-ui, sans-serif);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    line-height: 1;
+    white-space: nowrap;
+    color: #fff;
+    background: #dc2626;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 0 0 2px rgba(255, 255, 255, 0.35);
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(-14deg) scale(2.4);
+    animation: f7Stamp 0.34s cubic-bezier(0.2, 1.4, 0.4, 1) calc(var(--f7-delay, 0ms) + 760ms) forwards;
+  }
+  .f7-stamp-saved { background: #16a34a; }
+  .f7-stamp-sm { padding: 3px 6px; border-radius: 5px; font-size: 10px; letter-spacing: 0.06em; }
+
+  .f7-caption {
+    opacity: 0;
+    animation: f7CaptionIn 0.3s ease-out calc(var(--f7-delay, 0ms) + 680ms) forwards;
+  }
+  .f7-shake { animation: f7BustHit 0.55s ease-out calc(var(--f7-delay, 0ms) + 720ms) both; }
+
+  .f7-seven-burst {
+    font-family: var(--font-heading, system-ui, sans-serif);
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.1;
+    background: linear-gradient(90deg, #a3e635, #f472b6, #60a5fa, #fbbf24, #a3e635);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation:
+      f7SevenIn 0.5s cubic-bezier(0.2, 1.5, 0.4, 1) calc(var(--f7-delay, 0ms) + 700ms) both,
+      f7Shimmer 1.6s linear infinite;
+  }
+
+  /* ---- Freeze / Flip Three "attack" ---- */
+
+  .flip7-action-fly { animation: flip7ActionFly 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+  .flip7-impact-burst { animation: flip7ImpactBurst 0.7s ease-out 0.45s forwards; }
+  .flip7-label-out { animation: flip7LabelOut 1.3s ease-out forwards; }
+  /* Vignette in the action's color for the player who got hit */
+  .f7-self-hit {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 40%, color-mix(in srgb, var(--f7-ink) 22%, transparent) 100%);
+    box-shadow: inset 0 0 120px 45px color-mix(in srgb, var(--f7-ink) 50%, transparent);
+    animation: f7Vignette 1.3s ease-out forwards;
+  }
+
+  /* ---- Dealing, sheets, summary ---- */
+
+  .f7-deal-card { animation: f7DealOut 1s cubic-bezier(0.3, 0.7, 0.3, 1) var(--f7-delay, 0ms) infinite both; }
+  .flip7-sheet-up { animation: f7SheetUp 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .f7-toast { animation: f7ToastIn 0.25s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .f7-progress-fill { width: var(--to); animation: f7Grow 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both; }
+  .flip7-banner-in { animation: flip7BannerIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
 }
 
 /* ============================================
-   Flip 7 — Card Styles
+   Flip 7 — Keyframes
    ============================================ */
 
-.flip7-card {
-  background: linear-gradient(135deg, var(--bg-elevated), rgba(31, 28, 50, 0.8));
-  border: 1px solid rgba(163, 230, 53, 0.15);
-  border-top: 2px solid transparent;
-  border-image: linear-gradient(90deg, transparent, var(--game-accent), transparent) 1;
-  border-radius: 12px;
-  padding: 1rem;
+@keyframes f7PipHot {
+  0%, 100% { box-shadow: 0 0 4px rgba(163, 230, 53, 0.5); }
+  50% { box-shadow: 0 0 10px rgba(163, 230, 53, 0.95); }
 }
 
-/* ============================================
-   Flip 7 — Animations
-   ============================================ */
-
-@keyframes flip7FlipIn {
-  0% { transform: rotateY(90deg); opacity: 0; }
-  100% { transform: rotateY(0deg); opacity: 1; }
+@keyframes f7CardLand {
+  0% { transform: translateY(-16px) scale(0.8) rotate(-8deg); opacity: 0; }
+  60% { transform: translateY(2px) scale(1.05) rotate(1deg); opacity: 1; }
+  100% { transform: none; opacity: 1; }
 }
 
-@keyframes flip7BustShake {
-  0%, 100% { transform: translateX(0); }
-  20% { transform: translateX(-8px); }
-  40% { transform: translateX(8px); }
-  60% { transform: translateX(-4px); }
-  80% { transform: translateX(4px); }
+@keyframes f7BustRow {
+  0%, 100% { transform: none; }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
 }
 
-@keyframes flip7Celebrate {
-  0% { transform: scale(0.8); opacity: 0; }
-  50% { transform: scale(1.1); }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-@keyframes flip7SlideUp {
-  0% { transform: translateY(100%); }
-  100% { transform: translateY(0); }
-}
-
-.animate-flip-in {
-  animation: flip7FlipIn 0.5s ease-out forwards;
-}
-
-.animate-bust-shake {
-  animation: flip7BustShake 0.5s ease-out;
-}
-
-.animate-flip7-celebrate {
-  animation: flip7Celebrate 0.6s ease-out forwards;
-}
-
-.animate-slide-up {
-  animation: flip7SlideUp 0.3s ease-out forwards;
-}
-
-/* --- Active turn glow ring (subtle breathing) --- */
 @keyframes flip7TurnPulse {
   0%, 100% { box-shadow: 0 0 0 1px var(--game-accent), 0 0 6px rgba(163, 230, 53, 0.25); }
   50% { box-shadow: 0 0 0 2px var(--game-accent), 0 0 16px rgba(163, 230, 53, 0.55); }
 }
-.flip7-turn-glow {
-  animation: flip7TurnPulse 1.8s ease-in-out infinite;
+
+@keyframes flip7FrostIn {
+  0% { opacity: 0.6; }
+  100% { opacity: 1; }
 }
 
-/* --- Action projectile fly-across (Freeze / Flip Three) --- */
+@keyframes f7FadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes f7RevealOut {
+  to { opacity: 0; }
+}
+
+/* Rises showing its back, then turns over to reveal the face */
+@keyframes f7FlipReveal {
+  0% { transform: translateY(48px) scale(0.6) rotateY(180deg); }
+  45% { transform: translateY(-8px) scale(1.03) rotateY(180deg); }
+  85% { transform: translateY(0) scale(1.06) rotateY(-8deg); }
+  100% { transform: translateY(0) scale(1) rotateY(0deg); }
+}
+
+@keyframes f7Spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes f7Stamp {
+  to { opacity: 1; transform: translate(-50%, -50%) rotate(-14deg) scale(1); }
+}
+
+@keyframes f7CaptionIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes f7BustHit {
+  0%, 100% { transform: none; }
+  15% { transform: translateX(-10px) rotate(-3deg); }
+  30% { transform: translateX(9px) rotate(2deg); }
+  45% { transform: translateX(-6px) rotate(-1.5deg); }
+  60% { transform: translateX(4px) rotate(1deg); }
+  80% { transform: translateX(-2px); }
+}
+
+@keyframes f7SevenIn {
+  from { opacity: 0; transform: scale(0.4) rotate(-6deg); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes f7Shimmer {
+  to { background-position: 200% 0; }
+}
+
 @keyframes flip7ActionFly {
   0% { transform: translate(-42vw, 0) scale(0.4) rotate(-25deg); opacity: 0; }
   15% { opacity: 1; }
@@ -745,93 +1460,58 @@ input, textarea, select { font-size: 16px !important; }
   78% { transform: translate(0, 0) scale(1.35) rotate(0deg); }
   100% { transform: translate(0, 0) scale(1.45) rotate(0deg); opacity: 0; }
 }
-.flip7-action-fly {
-  animation: flip7ActionFly 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-}
 
-/* --- Impact burst ring on action landing --- */
 @keyframes flip7ImpactBurst {
   0% { transform: scale(0.2); opacity: 0.8; }
   100% { transform: scale(2.4); opacity: 0; }
 }
-.flip7-impact-burst {
-  animation: flip7ImpactBurst 0.7s ease-out 0.45s forwards;
-}
 
-/* --- Action label fade-out --- */
 @keyframes flip7LabelOut {
-  0%, 65% { opacity: 1; transform: translateY(0); }
+  0%, 70% { opacity: 1; transform: translateY(0); }
   100% { opacity: 0; transform: translateY(-6px); }
 }
-.flip7-label-out {
-  animation: flip7LabelOut 1.5s ease-out forwards;
+
+@keyframes f7Vignette {
+  0% { opacity: 0; }
+  25% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
-/* --- Frost overlay for frozen players (persistent) --- */
-@keyframes flip7FrostIn {
-  0% { opacity: 0; backdrop-filter: blur(0px); }
-  100% { opacity: 1; backdrop-filter: blur(1px); }
-}
-.flip7-frost {
-  background: linear-gradient(135deg, rgba(96, 165, 250, 0.18), rgba(191, 219, 254, 0.10));
-  border: 1px solid rgba(96, 165, 250, 0.45) !important;
-  animation: flip7FrostIn 0.5s ease-out forwards;
+@keyframes f7DealOut {
+  0% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 0; }
+  12% { opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.55); opacity: 0; }
 }
 
-/* --- Full-screen frost reaction for the player who just got frozen --- */
-@keyframes flip7SelfFrostIn {
-  0% { opacity: 0; backdrop-filter: blur(0px); }
-  25% { opacity: 1; backdrop-filter: blur(2px); }
-  70% { opacity: 1; backdrop-filter: blur(2px); }
-  100% { opacity: 0; backdrop-filter: blur(0px); }
-}
-.flip7-self-frost {
-  background: radial-gradient(ellipse at center, transparent 42%, rgba(96, 165, 250, 0.22) 100%);
-  box-shadow: inset 0 0 120px 45px rgba(96, 165, 250, 0.5);
-  animation: flip7SelfFrostIn 2.2s ease-out forwards;
+@keyframes f7SheetUp {
+  from { transform: translateY(100%); }
+  to { transform: none; }
 }
 
-@keyframes flip7SelfFlakeLand {
-  0% { transform: scale(2.6) rotate(-30deg); opacity: 0; }
-  22% { transform: scale(1.1) rotate(0deg); opacity: 1; }
-  55% { transform: scale(1) rotate(0deg); opacity: 0.9; }
-  100% { transform: scale(1.05) rotate(0deg); opacity: 0; }
-}
-.flip7-self-flake {
-  animation: flip7SelfFlakeLand 2.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+@keyframes f7ToastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
 }
 
-/* --- Busted card settle (one-shot shake into grayscale) --- */
-@keyframes flip7BustSettle {
-  0% { transform: translateX(0); filter: grayscale(0); }
-  15% { transform: translateX(-6px); }
-  30% { transform: translateX(6px); }
-  45% { transform: translateX(-3px); }
-  60% { transform: translateX(3px); }
-  100% { transform: translateX(0); filter: grayscale(0.7); }
-}
-.flip7-bust-settle {
-  animation: flip7BustSettle 0.6s ease-out forwards;
+@keyframes f7Grow {
+  from { width: var(--from); }
+  to { width: var(--to); }
 }
 
-/* --- Second Chance shield flash --- */
-@keyframes flip7ShieldFlash {
-  0% { transform: scale(0.5); opacity: 0; }
-  35% { transform: scale(1.25); opacity: 1; }
-  70% { transform: scale(1); opacity: 1; }
-  100% { transform: scale(1.1); opacity: 0; }
-}
-.flip7-shield-flash {
-  animation: flip7ShieldFlash 1.1s ease-out forwards;
-}
-
-/* --- Flip 7 celebration banner --- */
 @keyframes flip7BannerIn {
   0% { transform: scale(0.3) rotate(-8deg); opacity: 0; }
   55% { transform: scale(1.15) rotate(3deg); opacity: 1; }
   75% { transform: scale(0.95) rotate(0deg); }
   100% { transform: scale(1) rotate(0deg); opacity: 1; }
 }
-.flip7-banner-in {
-  animation: flip7BannerIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+
+@media (prefers-reduced-motion: reduce) {
+  [data-game="flip-7"] *,
+  [data-game="flip-7"] *::before,
+  [data-game="flip-7"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

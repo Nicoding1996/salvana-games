@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import type { BattleshipClientState, Coordinate, CellState, ShotEntry } from '@/types/games/battleship';
 import { GRID_LABELS_COL, SHIP_COLORS } from '@/types/games/battleship';
 import GridCell from './GridCell';
@@ -15,7 +15,7 @@ interface AttackGridProps {
 }
 
 // Haptic feedback helper — light patterns for mobile
-function haptic(type: 'miss' | 'hit' | 'sunk' | 'incoming') {
+function haptic(type: HapticKind) {
   if (typeof navigator === 'undefined' || !navigator.vibrate) return;
   switch (type) {
     case 'miss': navigator.vibrate(30); break;
@@ -23,6 +23,31 @@ function haptic(type: 'miss' | 'hit' | 'sunk' | 'incoming') {
     case 'sunk': navigator.vibrate([80, 40, 80, 40, 150]); break;
     case 'incoming': navigator.vibrate([60, 30, 60]); break;
   }
+}
+
+type HapticKind = 'miss' | 'hit' | 'sunk' | 'incoming';
+
+interface ShotFeedback {
+  shot: ShotEntry | null;
+  cell: string | null;   // "row,col" of the shot, for the impact animation
+  flash: string | null;  // overlay color, or null for no flash
+  shake: boolean;
+  haptic: HapticKind | null;
+}
+
+function shotFeedback(shot: ShotEntry | null, myId: string): ShotFeedback {
+  if (!shot) return { shot, cell: null, flash: null, shake: false, haptic: null };
+  const cell = `${shot.coordinate.row},${shot.coordinate.col}`;
+  const isHit = shot.result === 'hit' || shot.result === 'sunk';
+  if (shot.playerId === myId) {
+    // I fired — flash on hits, haptic by result
+    return { shot, cell, flash: isHit ? 'rgba(249,115,22,0.12)' : null, shake: false, haptic: shot.result };
+  }
+  if (shot.targetId === myId) {
+    // I got shot at — red flash + shake on hits
+    return { shot, cell, flash: isHit ? 'rgba(239,68,68,0.15)' : null, shake: isHit, haptic: 'incoming' };
+  }
+  return { shot, cell, flash: null, shake: false, haptic: null };
 }
 
 export default function AttackGrid({
@@ -36,70 +61,39 @@ export default function AttackGrid({
   const { players, attackGrids, myGrid, myShipMap, isMyTurn, shotsRemaining, settings, sonarUsed, currentTurnShots } = gameState;
 
   const opponents = players.filter(p => p.id !== myId && p.alive);
-  const opponentIds = opponents.map(p => p.id).join(',');
-  const [selectedTarget, setSelectedTarget] = useState<string>(opponents[0]?.id || '');
+  const [chosenTarget, setChosenTarget] = useState<string>('');
+  // Default to the first alive opponent until one is chosen, and again if the chosen one is eliminated
+  const selectedTarget = opponents.some(p => p.id === chosenTarget) ? chosenTarget : (opponents[0]?.id || '');
+
   const [sonarMode, setSonarMode] = useState(false);
-  const [shaking, setShaking] = useState(false);
-  const [flashColor, setFlashColor] = useState<string | null>(null);
-  const [newShotCell, setNewShotCell] = useState<string | null>(null); // "row,col" of latest shot for impact anim
-  const prevShotRef = useRef<ShotEntry | null>(null);
+  // Reset sonar mode when my turn ends (adjusting state during render, not in an effect)
+  const [prevIsMyTurn, setPrevIsMyTurn] = useState(isMyTurn);
+  if (isMyTurn !== prevIsMyTurn) {
+    setPrevIsMyTurn(isMyTurn);
+    if (!isMyTurn) setSonarMode(false);
+  }
 
-  // Reset sonar mode when turn changes
+  // Visual feedback for the latest shot result (impact cell, flash, shake), derived when the shot changes
+  const [fx, setFx] = useState<ShotFeedback>(() => shotFeedback(shotResult, myId));
+  if (shotResult !== fx.shot) {
+    setFx(shotFeedback(shotResult, myId));
+  }
+  const { shot: fxShot, haptic: fxHaptic } = fx;
+  const newShotCell = fx.cell; // "row,col" of latest shot for impact anim
+  const flashColor = fx.flash;
+  const shaking = fx.shake;
+
+  // Haptics for the new shot, then clear the transient visuals
   useEffect(() => {
-    if (!isMyTurn) {
-      setSonarMode(false);
-    }
-  }, [isMyTurn]);
-
-  // Auto-select first opponent if none selected
-  useEffect(() => {
-    if (isMyTurn && opponents.length > 0 && !selectedTarget) {
-      setSelectedTarget(opponents[0]?.id || '');
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMyTurn, opponentIds, selectedTarget]);
-
-  // Update selected target if current target is eliminated
-  useEffect(() => {
-    if (selectedTarget && !opponents.find(p => p.id === selectedTarget)) {
-      setSelectedTarget(opponents[0]?.id || '');
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opponentIds, selectedTarget]);
-
-  // Haptic feedback + visual effects on shot results
-  useEffect(() => {
-    if (!shotResult || shotResult === prevShotRef.current) return;
-    prevShotRef.current = shotResult;
-
-    // Track the new cell for impact animation
-    setNewShotCell(`${shotResult.coordinate.row},${shotResult.coordinate.col}`);
-    const clearTimer = setTimeout(() => setNewShotCell(null), 400);
-
-    if (shotResult.playerId === myId) {
-      // I fired — flash + haptic based on result
-      haptic(shotResult.result === 'sunk' ? 'sunk' : shotResult.result === 'hit' ? 'hit' : 'miss');
-      if (shotResult.result === 'hit' || shotResult.result === 'sunk') {
-        setFlashColor('rgba(249,115,22,0.12)');
-      }
-    } else if (shotResult.targetId === myId) {
-      // I got hit — red flash + shake + haptic
-      haptic('incoming');
-      if (shotResult.result === 'hit' || shotResult.result === 'sunk') {
-        setFlashColor('rgba(239,68,68,0.15)');
-        setShaking(true);
-        setTimeout(() => setShaking(false), 400);
-      }
-    }
-
-    // Clear flash
-    if (shotResult.result !== 'miss') {
-      setTimeout(() => setFlashColor(null), 300);
-    }
-
-    return () => clearTimeout(clearTimer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shotResult, myId]);
+    if (!fxShot) return;
+    if (fxHaptic) haptic(fxHaptic);
+    const clearFlash = setTimeout(() => setFx(f => (f.shot === fxShot ? { ...f, flash: null } : f)), 300);
+    const clearImpact = setTimeout(() => setFx(f => (f.shot === fxShot ? { ...f, cell: null, shake: false } : f)), 400);
+    return () => {
+      clearTimeout(clearFlash);
+      clearTimeout(clearImpact);
+    };
+  }, [fxShot, fxHaptic]);
 
   const gridSize = settings.gridSize;
   // Use actual viewport width on client, fallback to 375 for SSR
@@ -160,7 +154,7 @@ export default function AttackGrid({
           {opponents.map(p => (
             <button
               key={p.id}
-              onClick={() => setSelectedTarget(p.id)}
+              onClick={() => setChosenTarget(p.id)}
               className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs transition-all active:scale-95 ${
                 selectedTarget === p.id
                   ? 'bg-(--game-accent)/15 border-2 border-(--game-accent)/60 text-(--text-primary)'

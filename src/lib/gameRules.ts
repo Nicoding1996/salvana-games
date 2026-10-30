@@ -172,6 +172,16 @@ export const GAME_RULES: Record<string, GameRulesData> = {
           { bullet: '📈', text: 'Blinds increase over time — forces players to play, not just wait.' },
         ],
       },
+      {
+        title: 'Good to Know',
+        items: [
+          { bullet: '🙈', text: 'Your cards start face-down so neighbours can\'t peek. Tap them to flip, or press and hold to sneak a look.' },
+          { bullet: '⏱️', text: 'If your clock runs out you check when it\'s free, otherwise you fold.' },
+          { bullet: '🔥', text: 'When everyone left is all in, the hands are turned face-up and the rest of the board is dealt out.' },
+          { bullet: '🪙', text: 'Someone all in for less can only win what they matched. The extra goes into a side pot for the others.' },
+          { bullet: '🤝', text: 'Tied hands split the pot.' },
+        ],
+      },
     ],
     tips: [
       'Your phone shows your current best hand — use it if you\'re unsure about rankings.',
@@ -188,8 +198,9 @@ export const GAME_RULES: Record<string, GameRulesData> = {
       {
         title: 'Your Turn',
         items: [
-          { bullet: '🃏', text: 'HIT — flip a card from the deck.' },
+          { bullet: '🃏', text: 'HIT — flip one card from the deck, then play passes to the next player.' },
           { bullet: '🛑', text: 'STAY — stop and bank your points for this round.' },
+          { bullet: '⏱️', text: 'If the turn timer runs out, you stay automatically.' },
         ],
       },
       {
@@ -204,28 +215,28 @@ export const GAME_RULES: Record<string, GameRulesData> = {
       {
         title: 'Special Cards',
         items: [
-          { bullet: '❄️', text: 'Freeze — force another player to stop (they bank their current points).' },
-          { bullet: '⚡', text: 'Flip Three — force another player to draw 3 cards (risky for them!).' },
+          { bullet: '❄️', text: 'Freeze — pick any player still in (even yourself). They bank their points and sit out the rest of the round.' },
+          { bullet: '⚡', text: 'Flip Three — pick any player still in (even yourself). They must flip the next 3 cards, one at a time.' },
           { bullet: '💚', text: 'Second Chance — saves you from one bust (the duplicate is discarded).' },
           { bullet: '+2/+4', text: 'Modifiers — add bonus points to your score.' },
-          { bullet: '×2', text: 'Multiplier — doubles your total score for the round.' },
+          { bullet: '×2', text: 'Multiplier — doubles your number cards (not the +2/+4 or the Flip 7 bonus).' },
         ],
       },
       {
         title: 'Scoring',
         items: [
-          { bullet: '📊', text: 'Round score = sum of your card values + modifiers (+2, +4) + Flip 7 bonus (+15).' },
-          { bullet: '✖️', text: 'Each ×2 modifier doubles your total.' },
-          { bullet: '🏆', text: 'Scores add up across rounds. First to the target (100/200/300) wins!' },
+          { bullet: '📊', text: 'Round score = your number cards (doubled by each ×2), then +2/+4 modifiers, then the Flip 7 bonus (+15).' },
+          { bullet: '💀', text: 'Busted players score 0 for the round.' },
+          { bullet: '🏆', text: 'Scores add up across rounds. First to the target (100/200/300) wins. A tie at the top means one more round.' },
         ],
-        example: 'Cards: 2, 6, 9 = 17. Plus a +4 modifier = 21. Plus a ×2 = 42 points this round!',
+        example: 'Cards 2, 6, 9 = 17. A ×2 doubles that to 34, then a +4 makes 38 points this round.',
       },
     ],
     tips: [
+      'The HIT button shows your bust risk: the chance the next card duplicates one of yours.',
       'High numbers (10, 11, 12) have more copies in the deck — they\'re more likely to bust you.',
-      'Low numbers (0, 1, 2) are rare — if you have them, you\'re safer to keep flipping.',
-      'Freeze is great against someone on a hot streak with 5-6 cards.',
-      'In Chaos mode, everyone chooses simultaneously — no waiting for turns.',
+      'Freeze is great against someone on a hot streak with 5-6 cards, or on yourself to lock in a good hand.',
+      'In Chaos mode, everyone picks hit or stay at the same time, and there are no Freeze or Flip Three cards.',
     ],
   },
 

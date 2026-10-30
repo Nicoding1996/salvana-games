@@ -9,27 +9,49 @@ import {
   type Flip7ClientState,
   type Flip7PlayerInfo,
   type Flip7Settings,
+  type Flip7RoundScore,
   type Card,
-  type NumberCard,
-  type ActionCard,
-  type ModifierCard,
-  type ModifierCardKind,
+  type FlipResult,
   type PendingAction,
-  type PendingModifier,
   type ActivityLogEntry,
-  type PlayerRoundStatus,
   DEFAULT_FLIP7_SETTINGS,
   DECK_COMPOSITION,
-  FLIP_7_BONUS,
   FLIP_7_CARD_COUNT,
-  DISCONNECT_GRACE_MS,
-  ACTION_TIMEOUT_MS,
+  FLIP7_TARGET_SCORES,
+  FLIP7_TURN_TIMERS,
+  FLIP7_MIN_PLAYERS,
+  FLIP7_MAX_PLAYERS,
+  computeRoundScore,
 } from '@/types/games/flip7';
 
 // ---- Module-scoped state ----
 
 const games = new Map<string, Flip7ServerState>();
 const activeTimers = new Map<string, ReturnType<typeof setInterval>>();
+
+/** What the turn flow should do after a state change. */
+export type TurnOutcome = 'continue' | 'roundEnd';
+
+// ---- Settings ----
+
+/** Clamp host-provided settings to the allowed options (input arrives from the client). */
+function sanitizeSettings(input?: Partial<Flip7Settings>): Flip7Settings {
+  const settings: Flip7Settings = { ...DEFAULT_FLIP7_SETTINGS };
+  if (!input || typeof input !== 'object') return settings;
+
+  const target = FLIP7_TARGET_SCORES.find(t => t === input.targetScore);
+  if (target !== undefined) settings.targetScore = target;
+
+  const timer = FLIP7_TURN_TIMERS.find(t => t === input.turnTimer);
+  if (timer !== undefined) settings.turnTimer = timer;
+
+  if (input.mode === 'classic' || input.mode === 'chaos') settings.mode = input.mode;
+
+  if (typeof input.maxPlayers === 'number' && Number.isInteger(input.maxPlayers)) {
+    settings.maxPlayers = Math.min(FLIP7_MAX_PLAYERS, Math.max(FLIP7_MIN_PLAYERS, input.maxPlayers));
+  }
+  return settings;
+}
 
 // ---- Deck Construction ----
 
@@ -69,94 +91,106 @@ function buildDeck(mode: 'classic' | 'chaos'): Card[] {
   return cards;
 }
 
-// ---- Helper: get eligible targets for actions ----
-
-function getEligibleTargets(state: Flip7ServerState, drawerId: string): string[] {
-  // All active players are eligible targets (including the drawer themselves)
-  return state.turnOrder.filter(id => {
-    const pd = state.playerData[id];
-    return pd.roundStatus === 'active';
-  });
-}
-
-// ---- Helper: advance turn to next active player ----
-
-function advanceTurn(state: Flip7ServerState): 'continue' | 'roundEnd' {
-  // Clear pending states
-  state.pendingAction = null;
-  state.pendingModifier = null;
-
-  // Check if Flip 7 was achieved
-  if (state.flipSevenAchievedBy) return 'roundEnd';
-
-  // Check if any active players remain
-  const activePlayers = state.turnOrder.filter(id =>
-    state.playerData[id].roundStatus === 'active'
-  );
-
-  if (activePlayers.length === 0) return 'roundEnd';
-
-  // Advance to next active player (clockwise)
-  let attempts = 0;
-  do {
-    state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.turnOrder.length;
-    attempts++;
-    if (state.playerData[state.turnOrder[state.currentPlayerIndex]].roundStatus === 'active') {
-      return 'continue';
-    }
-  } while (attempts < state.turnOrder.length);
-
-  // Should never reach here if activePlayers.length > 0, but safety fallback
-  return 'roundEnd';
-}
-
-// ---- Helper: calculate round score ----
-
-function calculateRoundScore(playerData: Flip7ServerPlayerData, isFlip7: boolean): number {
-  if (playerData.roundStatus === 'busted') return 0;
-
-  // 1. Sum number card values
-  let base = playerData.numberCards.reduce((sum, card) => sum + card.value, 0);
-
-  // 2. Apply multiplicative modifiers FIRST (each ×2 doubles the number card sum)
-  const times2Count = playerData.modifiers.filter(m => m === 'times2').length;
-  base *= Math.pow(2, times2Count);
-
-  // 3. THEN add additive modifiers (not multiplied)
-  for (const mod of playerData.modifiers) {
-    if (mod === 'plus2') base += 2;
-    if (mod === 'plus4') base += 4;
-  }
-
-  // 4. THEN add Flip 7 bonus (not multiplied)
-  if (isFlip7) base += FLIP_7_BONUS;
-
-  return base;
-}
-
-// ---- Helper: draw a card from deck (replenish if empty) ----
-
+/** Draw the top card. Reshuffles the discard pile when the deck runs out. */
 function drawCard(state: Flip7ServerState): Card {
   if (state.deck.length === 0) {
-    // Rebuild deck from discard pile
-    state.deck = [...state.discardPile];
+    state.deck = state.discardPile;
     state.discardPile = [];
     shuffleArray(state.deck);
     console.log(`[Flip7] Deck exhausted, reshuffled ${state.deck.length} cards from discard`);
   }
+  if (state.deck.length === 0) {
+    // Every card is in someone's hand. Open a fresh deck so play can continue.
+    state.deck = buildDeck(state.settings.mode);
+    console.log('[Flip7] Deck and discard both empty, opened a fresh deck');
+  }
   return state.deck.pop()!;
 }
 
-// ---- Helper: check if player has duplicate number ----
+// ---- Helpers ----
 
-function hasDuplicateNumber(playerData: Flip7ServerPlayerData, value: number): boolean {
-  return playerData.numberCards.some(c => c.value === value);
+function getActivePlayers(state: Flip7ServerState): string[] {
+  return state.turnOrder.filter(id => state.playerData[id]?.roundStatus === 'active');
+}
+
+/** Move the turn to the next active player (clockwise), or report that the round is over. */
+function advanceTurn(state: Flip7ServerState): TurnOutcome {
+  state.pendingAction = null;
+
+  if (state.flipSevenAchievedBy) return 'roundEnd';
+  if (getActivePlayers(state).length === 0) return 'roundEnd';
+
+  for (let attempts = 0; attempts < state.turnOrder.length; attempts++) {
+    state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.turnOrder.length;
+    if (state.playerData[state.turnOrder[state.currentPlayerIndex]]?.roundStatus === 'active') {
+      return 'continue';
+    }
+  }
+  return 'roundEnd';
+}
+
+/**
+ * Apply a card to a player's hand. Used for regular hits, Flip Three draws and
+ * chaos resolution. Freeze / Flip Three drawn as a side effect don't chain;
+ * they're discarded.
+ */
+function resolveCardForPlayer(
+  state: Flip7ServerState,
+  playerId: string,
+  card: Card,
+): { result: FlipResult; flipSeven: boolean } {
+  const pd = state.playerData[playerId];
+
+  if (card.type === 'number') {
+    if (pd.numberCards.some(c => c.value === card.value)) {
+      state.discardPile.push(card);
+      if (pd.secondChances > 0) {
+        pd.secondChances--;
+        state.discardPile.push({ type: 'action', kind: 'secondChance' });
+        return { result: 'secondChance', flipSeven: false };
+      }
+      pd.roundStatus = 'busted';
+      pd.bustCard = card;
+      return { result: 'bust', flipSeven: false };
+    }
+    pd.numberCards.push(card);
+    const flipSeven = pd.numberCards.length >= FLIP_7_CARD_COUNT;
+    if (flipSeven && !state.flipSevenAchievedBy) {
+      state.flipSevenAchievedBy = playerId;
+    }
+    return { result: 'safe', flipSeven };
+  }
+
+  if (card.type === 'modifier') {
+    pd.modifiers.push(card.kind);
+    return { result: 'safe', flipSeven: false };
+  }
+
+  if (card.kind === 'secondChance') {
+    pd.secondChances++;
+  } else {
+    state.discardPile.push(card);
+  }
+  return { result: 'safe', flipSeven: false };
+}
+
+/** Chance (0–1) that the next card duplicates one of this player's numbers. */
+function bustChance(state: Flip7ServerState, pd: Flip7ServerPlayerData): number | null {
+  if (pd.roundStatus !== 'active') return null;
+  const pile = state.deck.length > 0 ? state.deck : state.discardPile;
+  if (pile.length === 0 || pd.numberCards.length === 0) return 0;
+  const held = new Set(pd.numberCards.map(c => c.value));
+  let dangerous = 0;
+  for (const card of pile) {
+    if (card.type === 'number' && held.has(card.value)) dangerous++;
+  }
+  return dangerous / pile.length;
 }
 
 // ---- Public API: createGame ----
 
 export function createGame(room: Room, settings?: Partial<Flip7Settings>): Flip7ServerState {
-  const mergedSettings: Flip7Settings = { ...DEFAULT_FLIP7_SETTINGS, ...settings };
+  const mergedSettings = sanitizeSettings(settings);
 
   // Build seating order from connected players (shuffled for random turn order)
   const playerIds = Object.keys(room.players).filter(id => room.players[id].connected);
@@ -175,11 +209,9 @@ export function createGame(room: Room, settings?: Partial<Flip7Settings>): Flip7
     cumulativeScores[id] = 0;
   }
 
-  const deck = buildDeck(mergedSettings.mode);
-
   const state: Flip7ServerState = {
     phase: 'dealing',
-    deck,
+    deck: buildDeck(mergedSettings.mode),
     discardPile: [],
     playerData,
     turnOrder: [...playerIds],
@@ -190,12 +222,13 @@ export function createGame(room: Room, settings?: Partial<Flip7Settings>): Flip7
     settings: mergedSettings,
     turnTimerEnd: null,
     pendingAction: null,
-    pendingModifier: null,
     activityLog: [],
     flipSevenAchievedBy: null,
-    chaosChoices: null,
+    chaosChoices: mergedSettings.mode === 'chaos' ? {} : null,
+    departed: [],
     lastRoundScores: null,
     lastWinnerId: null,
+    roundHistory: [],
   };
 
   games.set(room.code, state);
@@ -204,233 +237,91 @@ export function createGame(room: Room, settings?: Partial<Flip7Settings>): Flip7
 }
 
 // ---- Public API: dealInitialCards ----
-// Called after createGame to deal one card to each player.
-// Returns array of deal events for broadcasting.
+// Deals one card to each player (clockwise from the dealer's left) and starts play.
+// Freeze / Flip Three are slid to the bottom of the deck instead of being dealt.
 
-export interface DealEvent {
-  playerId: string;
-  playerName: string;
-  card: Card;
-  resolved?: 'freeze' | 'flipThree' | 'secondChance' | 'modifier';
-  freezeTargetId?: string;
-  flipThreeResults?: { card: Card; result: 'safe' | 'bust' | 'secondChance' }[];
-}
-
-export function dealInitialCards(roomCode: string, room: Room): DealEvent[] {
+export function dealInitialCards(roomCode: string): TurnOutcome | null {
   const state = games.get(roomCode);
-  if (!state) return [];
+  if (!state || state.phase !== 'dealing') return null;
 
-  const events: DealEvent[] = [];
-  const dealOrder = getDealOrder(state);
-
-  for (const playerId of dealOrder) {
-    const pd = state.playerData[playerId];
-    if (!pd || pd.roundStatus !== 'active') continue;
-
-    // Draw cards until we get a non-disruptive one (skip Freeze/FlipThree during deal)
-    let card = drawCard(state);
-    while (card.type === 'action' && (card.kind === 'freeze' || card.kind === 'flipThree')) {
-      // Put disruptive action cards back into the deck and reshuffle
-      state.deck.push(card);
-      shuffleArray(state.deck);
-      card = drawCard(state);
-    }
-
-    const playerName = room.players[playerId]?.name || 'Unknown';
-    const event: DealEvent = { playerId, playerName, card };
-
-    if (card.type === 'number') {
-      pd.numberCards.push(card);
-    } else if (card.type === 'modifier') {
-      pd.modifiers.push(card.kind);
-      event.resolved = 'modifier';
-    } else if (card.type === 'action' && card.kind === 'secondChance') {
-      pd.secondChances++;
-      event.resolved = 'secondChance';
-    }
-
-    events.push(event);
-  }
-
-  // Set phase to playing and set first turn
-  state.phase = 'playing';
-  // First turn goes to player left of dealer
-  state.currentPlayerIndex = (state.dealerIndex + 1) % state.turnOrder.length;
-  // Skip to first active player
-  let attempts = 0;
-  while (
-    state.playerData[state.turnOrder[state.currentPlayerIndex]]?.roundStatus !== 'active' &&
-    attempts < state.turnOrder.length
-  ) {
-    state.currentPlayerIndex = (state.currentPlayerIndex + 1) % state.turnOrder.length;
-    attempts++;
-  }
-
-  return events;
-}
-
-// ---- Helper: resolve a card for a player (used during deal and flipThree) ----
-
-function resolveCardForPlayer(
-  state: Flip7ServerState,
-  playerId: string,
-  card: Card
-): 'safe' | 'bust' | 'secondChance' {
-  const pd = state.playerData[playerId];
-
-  if (card.type === 'number') {
-    if (hasDuplicateNumber(pd, card.value)) {
-      // Check for Second Chance
-      if (pd.secondChances > 0) {
-        pd.secondChances--;
-        state.discardPile.push(card);
-        return 'secondChance';
-      }
-      pd.roundStatus = 'busted';
-      pd.bustCard = card as NumberCard;
-      state.discardPile.push(card);
-      return 'bust';
-    }
-    pd.numberCards.push(card);
-    // Check Flip 7
-    if (pd.numberCards.length >= FLIP_7_CARD_COUNT) {
-      state.flipSevenAchievedBy = playerId;
-    }
-    return 'safe';
-  } else if (card.type === 'modifier') {
-    pd.modifiers.push(card.kind);
-    return 'safe';
-  } else if (card.type === 'action') {
-    if (card.kind === 'secondChance') {
-      pd.secondChances++;
-    }
-    // Freeze and FlipThree during flipThree resolution are discarded
-    // (they don't chain — simplified for digital version)
-    state.discardPile.push(card);
-    return 'safe';
-  }
-
-  return 'safe';
-}
-
-// ---- Helper: get deal order (clockwise from left of dealer) ----
-
-function getDealOrder(state: Flip7ServerState): string[] {
-  const order: string[] = [];
   const len = state.turnOrder.length;
   for (let i = 1; i <= len; i++) {
-    order.push(state.turnOrder[(state.dealerIndex + i) % len]);
+    const playerId = state.turnOrder[(state.dealerIndex + i) % len];
+    const pd = state.playerData[playerId];
+    if (!pd) continue;
+
+    // Players who left sit the round out
+    if (state.departed.includes(playerId)) {
+      pd.roundStatus = 'stayed';
+      continue;
+    }
+
+    let card = drawCard(state);
+    for (let attempts = 0; attempts < 20 && card.type === 'action' && card.kind !== 'secondChance'; attempts++) {
+      state.deck.unshift(card);
+      card = drawCard(state);
+    }
+    resolveCardForPlayer(state, playerId, card);
   }
-  return order;
+
+  state.phase = 'playing';
+  // First turn goes to the first active player left of the dealer
+  state.currentPlayerIndex = state.dealerIndex;
+  const outcome = advanceTurn(state);
+  if (outcome === 'roundEnd') {
+    // Nobody can play (everyone left). Park on the dealer and let the round end.
+    state.currentPlayerIndex = state.dealerIndex;
+  }
+  return outcome;
 }
 
 // ---- Public API: hit ----
 
 export interface HitResult {
   card: Card;
-  result: 'safe' | 'bust' | 'secondChance';
+  result: FlipResult;
   flipSeven: boolean;
-  turnResult: 'continue' | 'roundEnd';
-  pendingAction?: PendingAction;
-  pendingModifier?: PendingModifier;
+  turnResult: TurnOutcome;
+  pendingAction: PendingAction | null;
 }
 
 export function hit(roomCode: string, playerId: string): HitResult | null {
   const state = games.get(roomCode);
-  if (!state || state.phase !== 'playing') return null;
-
-  // Block all actions if Flip 7 was achieved (round is ending)
-  if (state.flipSevenAchievedBy) return null;
-
-  // Validate it's this player's turn (classic mode)
-  if (state.settings.mode === 'classic') {
-    const currentPlayerId = state.turnOrder[state.currentPlayerIndex];
-    if (currentPlayerId !== playerId) return null;
-  }
+  if (!state || state.phase !== 'playing' || state.settings.mode !== 'classic') return null;
+  // Round is ending, or the drawer still has to pick a target (blocks double-taps)
+  if (state.flipSevenAchievedBy || state.pendingAction) return null;
+  if (state.turnOrder[state.currentPlayerIndex] !== playerId) return null;
 
   const pd = state.playerData[playerId];
   if (!pd || pd.roundStatus !== 'active') return null;
 
   const card = drawCard(state);
 
-  if (card.type === 'number') {
-    if (hasDuplicateNumber(pd, card.value)) {
-      // Check Second Chance
-      if (pd.secondChances > 0) {
-        pd.secondChances--;
-        state.discardPile.push(card);
-        // Second Chance saves you but your draw is used — advance turn
-        const turnResult = state.settings.mode === 'classic' ? advanceTurn(state) : 'continue' as const;
-        return { card, result: 'secondChance', flipSeven: false, turnResult };
-      }
-      // Bust
-      pd.roundStatus = 'busted';
-      pd.bustCard = card as NumberCard;
-      state.discardPile.push(card);
-      const turnResult = state.settings.mode === 'classic' ? advanceTurn(state) : 'continue';
-      return { card, result: 'bust', flipSeven: false, turnResult };
-    }
-    // Safe — add to tableau
-    pd.numberCards.push(card);
-    const flipSeven = pd.numberCards.length >= FLIP_7_CARD_COUNT;
-    if (flipSeven) {
-      state.flipSevenAchievedBy = playerId;
-    }
-    // In classic mode: 1 card per turn, then advance to next player
-    const turnResult = flipSeven
-      ? 'roundEnd' as const
-      : (state.settings.mode === 'classic' ? advanceTurn(state) : 'continue' as const);
-    return { card, result: 'safe', flipSeven, turnResult };
-  }
-
-  if (card.type === 'action') {
+  // Freeze / Flip Three: the drawer picks a target (any active player, including themselves)
+  if (card.type === 'action' && (card.kind === 'freeze' || card.kind === 'flipThree')) {
     state.discardPile.push(card);
-    if (card.kind === 'secondChance') {
-      pd.secondChances++;
-      // Drawing Second Chance counts as your card — advance turn
-      const turnResult = state.settings.mode === 'classic' ? advanceTurn(state) : 'continue' as const;
-      return { card, result: 'safe', flipSeven: false, turnResult };
-    }
-    // Freeze or FlipThree — set pending action
-    const eligible = getEligibleTargets(state, playerId);
-    if (eligible.length === 0) {
-      // No valid targets, discard with no effect — advance turn (card was still your draw)
-      const turnResult = state.settings.mode === 'classic' ? advanceTurn(state) : 'continue' as const;
-      return { card, result: 'safe', flipSeven: false, turnResult };
-    }
-    const pending: PendingAction = {
-      cardKind: card.kind as 'freeze' | 'flipThree',
+    state.pendingAction = {
+      cardKind: card.kind,
       drawerId: playerId,
-      eligibleTargets: eligible,
+      eligibleTargets: getActivePlayers(state),
     };
-    state.pendingAction = pending;
-    return { card, result: 'safe', flipSeven: false, turnResult: 'continue', pendingAction: pending };
+    return { card, result: 'safe', flipSeven: false, turnResult: 'continue', pendingAction: state.pendingAction };
   }
 
-  if (card.type === 'modifier') {
-    // All modifiers are positive — auto-keep, then advance turn (1 card per turn)
-    pd.modifiers.push(card.kind);
-    const turnResult = state.settings.mode === 'classic' ? advanceTurn(state) : 'continue' as const;
-    return { card, result: 'safe', flipSeven: false, turnResult };
-  }
-
-  return { card, result: 'safe', flipSeven: false, turnResult: 'continue' };
+  // Everything else resolves immediately, and the turn passes (one card per turn)
+  const { result, flipSeven } = resolveCardForPlayer(state, playerId, card);
+  const turnResult = flipSeven ? 'roundEnd' : advanceTurn(state);
+  return { card, result, flipSeven, turnResult, pendingAction: null };
 }
 
 // ---- Public API: stay ----
+// Also used for auto-stays (turn timer expiry, disconnect grace).
 
-export function stay(roomCode: string, playerId: string): 'continue' | 'roundEnd' | null {
+export function stay(roomCode: string, playerId: string): TurnOutcome | null {
   const state = games.get(roomCode);
-  if (!state || state.phase !== 'playing') return null;
-
-  // Block all actions if Flip 7 was achieved (round is ending)
-  if (state.flipSevenAchievedBy) return null;
-
-  // Validate turn (classic mode)
-  if (state.settings.mode === 'classic') {
-    const currentPlayerId = state.turnOrder[state.currentPlayerIndex];
-    if (currentPlayerId !== playerId) return null;
-  }
+  if (!state || state.phase !== 'playing' || state.settings.mode !== 'classic') return null;
+  if (state.flipSevenAchievedBy || state.pendingAction) return null;
+  if (state.turnOrder[state.currentPlayerIndex] !== playerId) return null;
 
   const pd = state.playerData[playerId];
   if (!pd || pd.roundStatus !== 'active') return null;
@@ -439,233 +330,211 @@ export function stay(roomCode: string, playerId: string): 'continue' | 'roundEnd
   return advanceTurn(state);
 }
 
-// ---- Public API: useAction (resolve Freeze or FlipThree) ----
+// ---- Public API: useAction (resolve Freeze or Flip Three) ----
 
 export interface ActionResult {
   type: 'freeze' | 'flipThree';
+  drawerId: string;
   targetId: string;
-  flipThreeResults?: { card: Card; result: 'safe' | 'bust' | 'secondChance' }[];
-  turnResult: 'continue' | 'roundEnd';
+  flipThreeResults: { card: Card; result: FlipResult; flipSeven: boolean }[];
+  turnResult: TurnOutcome;
 }
 
-export function useAction(roomCode: string, playerId: string, targetId: string): ActionResult | null {
+export function resolveAction(roomCode: string, playerId: string, targetId: string): ActionResult | null {
   const state = games.get(roomCode);
-  if (!state || !state.pendingAction) return null;
-  if (state.pendingAction.drawerId !== playerId) return null;
-  if (!state.pendingAction.eligibleTargets.includes(targetId)) return null;
+  if (!state || state.phase !== 'playing' || !state.pendingAction) return null;
+  const pending = state.pendingAction;
+  if (pending.drawerId !== playerId) return null;
+  if (!pending.eligibleTargets.includes(targetId)) return null;
 
-  const actionKind = state.pendingAction.cardKind;
+  const targetPd = state.playerData[targetId];
+  if (!targetPd || targetPd.roundStatus !== 'active') return null;
+
   state.pendingAction = null;
+  const flipThreeResults: ActionResult['flipThreeResults'] = [];
 
-  if (actionKind === 'freeze') {
-    const targetPd = state.playerData[targetId];
-    if (targetPd) {
-      targetPd.roundStatus = 'frozen';
+  if (pending.cardKind === 'freeze') {
+    targetPd.roundStatus = 'frozen';
+  } else {
+    for (let i = 0; i < 3; i++) {
+      if (targetPd.roundStatus !== 'active') break;
+      if (targetPd.numberCards.length >= FLIP_7_CARD_COUNT) break;
+      const card = drawCard(state);
+      const resolved = resolveCardForPlayer(state, targetId, card);
+      flipThreeResults.push({ card, ...resolved });
+      if (resolved.flipSeven) break;
     }
-    // After resolving action, advance turn to next player
-    const activePlayers = state.turnOrder.filter(id =>
-      state.playerData[id].roundStatus === 'active'
-    );
-    if (activePlayers.length === 0) return { type: 'freeze', targetId, turnResult: 'roundEnd' };
-    const turnResult = advanceTurn(state);
-    return { type: 'freeze', targetId, turnResult };
   }
 
-  if (actionKind === 'flipThree') {
-    const targetPd = state.playerData[targetId];
-    const results: { card: Card; result: 'safe' | 'bust' | 'secondChance' }[] = [];
-
-    if (targetPd) {
-      for (let i = 0; i < 3; i++) {
-        if (targetPd.roundStatus === 'busted') break;
-        if (targetPd.numberCards.length >= FLIP_7_CARD_COUNT) break;
-        const card = drawCard(state);
-        const result = resolveCardForPlayer(state, targetId, card);
-        results.push({ card, result });
-      }
-    }
-
-    const flipSeven = state.flipSevenAchievedBy !== null;
-    // After resolving action, advance turn to next player (unless round ends)
-    const turnResult = flipSeven ? 'roundEnd' as const : advanceTurn(state);
-    return { type: 'flipThree', targetId, flipThreeResults: results, turnResult };
-  }
-
-  return null;
+  const turnResult = state.flipSevenAchievedBy ? 'roundEnd' : advanceTurn(state);
+  return { type: pending.cardKind, drawerId: playerId, targetId, flipThreeResults, turnResult };
 }
 
-// ---- Public API: giveModifier ----
+/**
+ * The drawer ran out of time (or disconnected) while picking a target.
+ * Picks a random opponent; falls back to the drawer if nobody else is active.
+ */
+export type AutoActionOutcome =
+  | { kind: 'resolved'; result: ActionResult }
+  | { kind: 'fizzled'; turnResult: TurnOutcome };
 
-export function giveModifier(roomCode: string, playerId: string, targetId: string | null): 'continue' | 'roundEnd' | null {
+export function autoResolveAction(roomCode: string): AutoActionOutcome | null {
   const state = games.get(roomCode);
-  if (!state || !state.pendingModifier) return null;
-  if (state.pendingModifier.drawerId !== playerId) return null;
+  if (!state || state.phase !== 'playing' || !state.pendingAction) return null;
 
-  const modKind = state.pendingModifier.cardKind;
-  state.pendingModifier = null;
+  const { drawerId, eligibleTargets } = state.pendingAction;
+  const valid = eligibleTargets.filter(id => state.playerData[id]?.roundStatus === 'active');
+  const opponents = valid.filter(id => id !== drawerId);
+  const pool = opponents.length > 0 ? opponents : valid;
 
-  if (targetId && targetId !== playerId) {
-    // Transfer: remove from drawer, add to target
-    const drawerPd = state.playerData[playerId];
-    const targetPd = state.playerData[targetId];
-    if (drawerPd && targetPd) {
-      const idx = drawerPd.modifiers.lastIndexOf(modKind);
-      if (idx !== -1) {
-        drawerPd.modifiers.splice(idx, 1);
-        targetPd.modifiers.push(modKind);
-      }
-    }
+  if (pool.length > 0) {
+    const targetId = pool[Math.floor(Math.random() * pool.length)];
+    const result = resolveAction(roomCode, drawerId, targetId);
+    if (result) return { kind: 'resolved', result };
   }
-  // If targetId is null or same as playerId, keep it (already added in hit())
 
-  // Modifier choice does NOT end the turn — player continues hitting or staying
-  return 'continue';
+  // Nobody can be targeted. The card is discarded with no effect.
+  state.pendingAction = null;
+  return { kind: 'fizzled', turnResult: advanceTurn(state) };
 }
 
-// ---- Public API: chaosSubmit ----
+// ---- Public API: Chaos Mode ----
 
 export function chaosSubmit(roomCode: string, playerId: string, choice: 'hit' | 'stay'): boolean {
   const state = games.get(roomCode);
   if (!state || state.phase !== 'playing' || state.settings.mode !== 'chaos') return false;
+  if (state.flipSevenAchievedBy) return false;
+  if (choice !== 'hit' && choice !== 'stay') return false;
 
   const pd = state.playerData[playerId];
   if (!pd || pd.roundStatus !== 'active') return false;
 
   if (!state.chaosChoices) state.chaosChoices = {};
+  if (state.chaosChoices[playerId]) return false; // locked in
   state.chaosChoices[playerId] = choice;
   return true;
 }
 
-// Check if all active players have submitted chaos choices
+/** True when every active player has locked in a choice for this tick. */
 export function allChaosChoicesIn(roomCode: string): boolean {
   const state = games.get(roomCode);
-  if (!state || !state.chaosChoices) return false;
-
-  const activePlayers = state.turnOrder.filter(id =>
-    state.playerData[id].roundStatus === 'active'
-  );
-  return activePlayers.every(id => state.chaosChoices![id] !== undefined);
+  if (!state || state.phase !== 'playing' || state.settings.mode !== 'chaos') return false;
+  const active = getActivePlayers(state);
+  return active.length > 0 && active.every(id => state.chaosChoices?.[id] !== undefined);
 }
 
-// Resolve all chaos choices simultaneously
+/** Lock in 'stay' for every active player who hasn't chosen. Returns who was auto-stayed. */
+export function forceChaosStays(roomCode: string): string[] {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'playing' || state.settings.mode !== 'chaos') return [];
+  if (!state.chaosChoices) state.chaosChoices = {};
+  const forced: string[] = [];
+  for (const id of getActivePlayers(state)) {
+    if (!state.chaosChoices[id]) {
+      state.chaosChoices[id] = 'stay';
+      forced.push(id);
+    }
+  }
+  return forced;
+}
+
 export interface ChaosResult {
-  results: { playerId: string; choice: 'hit' | 'stay'; card?: Card; result?: 'safe' | 'bust' | 'secondChance'; flipSeven?: boolean }[];
-  roundEnd: boolean;
+  results: {
+    playerId: string;
+    choice: 'hit' | 'stay';
+    card?: Card;
+    result?: FlipResult;
+    flipSeven?: boolean;
+  }[];
+  turnResult: TurnOutcome;
 }
 
+/** Resolve every locked-in choice at once, in seating order. */
 export function resolveChaos(roomCode: string): ChaosResult | null {
   const state = games.get(roomCode);
-  if (!state || !state.chaosChoices) return null;
+  if (!state || state.phase !== 'playing' || state.settings.mode !== 'chaos') return null;
 
+  const choices = state.chaosChoices ?? {};
   const results: ChaosResult['results'] = [];
-  let roundEnd = false;
 
-  // Process in turn order
   for (const playerId of state.turnOrder) {
     const pd = state.playerData[playerId];
-    if (pd.roundStatus !== 'active') continue;
+    if (!pd || pd.roundStatus !== 'active') continue;
 
-    const choice = state.chaosChoices[playerId] || 'stay';
-
+    const choice = choices[playerId] ?? 'stay';
     if (choice === 'stay') {
       pd.roundStatus = 'stayed';
       results.push({ playerId, choice: 'stay' });
-    } else {
-      const card = drawCard(state);
-      const result = resolveCardForPlayer(state, playerId, card);
-      const flipSeven = state.flipSevenAchievedBy === playerId;
-      results.push({ playerId, choice: 'hit', card, result, flipSeven });
-      if (flipSeven) roundEnd = true;
+      continue;
     }
+    const card = drawCard(state);
+    const resolved = resolveCardForPlayer(state, playerId, card);
+    results.push({ playerId, choice: 'hit', card, ...resolved });
   }
 
-  // Check if round should end (all stayed/busted or flip7)
-  const activePlayers = state.turnOrder.filter(id =>
-    state.playerData[id].roundStatus === 'active'
-  );
-  if (activePlayers.length === 0 || state.flipSevenAchievedBy) {
-    roundEnd = true;
-  }
-
-  // Clear chaos choices for next tick
   state.chaosChoices = {};
-
-  return { results, roundEnd };
+  const roundOver = state.flipSevenAchievedBy !== null || getActivePlayers(state).length === 0;
+  return { results, turnResult: roundOver ? 'roundEnd' : 'continue' };
 }
 
 // ---- Public API: endRound (calculate scores, check win) ----
 
-export interface RoundEndResult {
-  scores: { playerId: string; roundScore: number; cumulativeScore: number; busted: boolean }[];
-  winnerId: string | null;
-  flipSevenBy: string | null;
-}
-
-export function endRound(roomCode: string): RoundEndResult | null {
+export function endRound(roomCode: string): boolean {
   const state = games.get(roomCode);
-  if (!state) return null;
+  if (!state || state.phase !== 'playing') return false;
 
-  state.phase = 'roundEnd';
-  const scores: RoundEndResult['scores'] = [];
+  state.pendingAction = null;
+  state.chaosChoices = state.settings.mode === 'chaos' ? {} : null;
+  state.turnTimerEnd = null;
 
+  const scores: Omit<Flip7RoundScore, 'playerName'>[] = [];
   for (const playerId of state.turnOrder) {
+    if (state.departed.includes(playerId)) continue;
     const pd = state.playerData[playerId];
-    const isFlip7 = state.flipSevenAchievedBy === playerId;
-    const roundScore = calculateRoundScore(pd, isFlip7);
-    state.cumulativeScores[playerId] = (state.cumulativeScores[playerId] || 0) + roundScore;
-
+    const busted = pd.roundStatus === 'busted';
+    const roundScore = computeRoundScore(pd.numberCards.map(c => c.value), pd.modifiers, busted);
+    state.cumulativeScores[playerId] = (state.cumulativeScores[playerId] ?? 0) + roundScore;
     scores.push({
       playerId,
       roundScore,
       cumulativeScore: state.cumulativeScores[playerId],
-      busted: pd.roundStatus === 'busted',
+      busted,
+      flipSeven: !busted && pd.numberCards.length >= FLIP_7_CARD_COUNT,
     });
   }
 
-  // Check win condition
+  state.roundHistory.push({
+    round: state.round,
+    scores: scores.map(({ playerId, roundScore, busted, flipSeven }) => ({ playerId, roundScore, busted, flipSeven })),
+  });
+
+  // Win: highest score at or above the target. A tie at the top keeps the game going.
+  const qualifiers = scores
+    .filter(s => s.cumulativeScore >= state.settings.targetScore)
+    .sort((a, b) => b.cumulativeScore - a.cumulativeScore);
   let winnerId: string | null = null;
-  const targetScore = state.settings.targetScore;
-  const qualifiers = scores.filter(s => s.cumulativeScore >= targetScore);
-
-  if (qualifiers.length === 1) {
+  if (qualifiers.length === 1 || (qualifiers.length > 1 && qualifiers[0].cumulativeScore > qualifiers[1].cumulativeScore)) {
     winnerId = qualifiers[0].playerId;
-  } else if (qualifiers.length > 1) {
-    // Multiple players over target — check if one is clearly ahead
-    qualifiers.sort((a, b) => b.cumulativeScore - a.cumulativeScore);
-    if (qualifiers[0].cumulativeScore > qualifiers[1].cumulativeScore) {
-      // One player has the highest score — they win
-      winnerId = qualifiers[0].playerId;
-    } else {
-      // Tied at the top — per official rules, keep playing until one player is ahead
-      // Don't declare a winner, game continues with more rounds
-      winnerId = null;
-    }
   }
 
-  if (winnerId) {
-    state.phase = 'finished';
-  }
-
-  // Store for getClientState
   state.lastRoundScores = scores;
   state.lastWinnerId = winnerId;
-
-  return { scores, winnerId, flipSevenBy: state.flipSevenAchievedBy };
+  state.phase = winnerId ? 'finished' : 'roundEnd';
+  return true;
 }
 
 // ---- Public API: nextRound ----
 
-export function nextRound(roomCode: string, room: Room): boolean {
+export function nextRound(roomCode: string): boolean {
   const state = games.get(roomCode);
   if (!state || state.phase !== 'roundEnd') return false;
 
-  // Discard all cards in play
+  // Everything on the table goes to the discard pile (bust cards are already there)
   for (const playerId of state.turnOrder) {
     const pd = state.playerData[playerId];
-    for (const card of pd.numberCards) {
-      state.discardPile.push(card);
-    }
-    // Modifiers and second chances are conceptual, not physical cards to discard
+    state.discardPile.push(...pd.numberCards);
+    for (const kind of pd.modifiers) state.discardPile.push({ type: 'modifier', kind });
+    for (let i = 0; i < pd.secondChances; i++) state.discardPile.push({ type: 'action', kind: 'secondChance' });
     pd.numberCards = [];
     pd.modifiers = [];
     pd.secondChances = 0;
@@ -673,7 +542,6 @@ export function nextRound(roomCode: string, room: Room): boolean {
     pd.bustCard = null;
   }
 
-  // Rotate dealer
   state.dealerIndex = (state.dealerIndex + 1) % state.turnOrder.length;
   state.round++;
   state.flipSevenAchievedBy = null;
@@ -682,10 +550,9 @@ export function nextRound(roomCode: string, room: Room): boolean {
   state.lastRoundScores = null;
   state.lastWinnerId = null;
   state.pendingAction = null;
-  state.pendingModifier = null;
   state.turnTimerEnd = null;
 
-  // Rebuild deck if empty
+  // Fresh deck when running low, so a round never starts on a near-empty pile
   if (state.deck.length < state.turnOrder.length + 10) {
     state.deck = buildDeck(state.settings.mode);
     state.discardPile = [];
@@ -698,7 +565,6 @@ export function nextRound(roomCode: string, room: Room): boolean {
 // ---- Public API: rematch ----
 
 export function rematch(roomCode: string, room: Room, settings?: Partial<Flip7Settings>): Flip7ServerState {
-  // Delete old state and create fresh game with provided settings
   games.delete(roomCode);
   clearRoomTimer(roomCode);
   return createGame(room, settings);
@@ -711,8 +577,9 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
   if (!state) return null;
 
   const myData = state.playerData[playerId];
+  const present = state.turnOrder.filter(id => !state.departed.includes(id));
 
-  const players: Flip7PlayerInfo[] = state.turnOrder.map(id => {
+  const players: Flip7PlayerInfo[] = present.map(id => {
     const pd = state.playerData[id];
     const player = room.players[id];
     return {
@@ -727,11 +594,14 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
       hasSecondChance: pd.secondChances > 0,
       modifiers: [...pd.modifiers],
       cumulativeScore: state.cumulativeScores[id] || 0,
-      roundScore: 0, // populated at roundEnd
     };
   });
 
-  const currentPlayerId = state.turnOrder[state.currentPlayerIndex] || null;
+  const playing = state.phase === 'playing';
+  const currentPlayerId = playing && state.settings.mode === 'classic'
+    ? state.turnOrder[state.currentPlayerIndex] ?? null
+    : null;
+  const showScores = state.phase === 'roundEnd' || state.phase === 'finished';
 
   return {
     phase: state.phase,
@@ -739,23 +609,24 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
     myCards: myData ? [...myData.numberCards] : [],
     myModifiers: myData ? [...myData.modifiers] : [],
     mySecondChances: myData?.secondChances ?? 0,
-    myRoundStatus: myData?.roundStatus ?? 'active',
-    activePlayerId: state.settings.mode === 'classic' ? currentPlayerId : null,
-    isMyTurn: state.settings.mode === 'classic' && currentPlayerId === playerId,
+    myRoundStatus: myData?.roundStatus ?? 'stayed',
+    myBustChance: playing && myData ? bustChance(state, myData) : null,
+    activePlayerId: currentPlayerId,
+    isMyTurn: currentPlayerId === playerId && !state.flipSevenAchievedBy,
     deckRemaining: state.deck.length,
     round: state.round,
-    dealerIndex: state.dealerIndex,
     settings: state.settings,
-    pendingAction: state.pendingAction?.drawerId === playerId ? state.pendingAction : null,
-    pendingModifier: state.pendingModifier?.drawerId === playerId ? state.pendingModifier : null,
-    lastFlip: null, // set by socket handler on broadcast
-    roundScores: (state.phase === 'roundEnd' || state.phase === 'finished') && state.lastRoundScores
-      ? state.lastRoundScores.map(s => ({
-          ...s,
-          playerName: room.players[s.playerId]?.name || 'Unknown',
-        }))
+    pendingAction: state.pendingAction
+      ? { ...state.pendingAction, eligibleTargets: [...state.pendingAction.eligibleTargets] }
       : null,
-    winnerId: state.lastWinnerId || null,
+    chaosSubmitted: state.chaosChoices ? Object.keys(state.chaosChoices) : [],
+    roundScores: showScores && state.lastRoundScores
+      ? state.lastRoundScores
+          .filter(s => present.includes(s.playerId))
+          .map(s => ({ ...s, playerName: room.players[s.playerId]?.name || 'Unknown' }))
+      : null,
+    roundHistory: state.roundHistory,
+    winnerId: state.lastWinnerId,
     activityLog: state.activityLog.slice(-20),
     flipSevenAchievedBy: state.flipSevenAchievedBy,
   };
@@ -766,84 +637,103 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
 export function swapPlayerId(roomCode: string, oldId: string, newId: string): void {
   const state = games.get(roomCode);
   if (!state) return;
+  const swap = (id: string) => (id === oldId ? newId : id);
 
-  // Swap in playerData
   if (state.playerData[oldId]) {
     state.playerData[newId] = state.playerData[oldId];
     delete state.playerData[oldId];
   }
+  state.turnOrder = state.turnOrder.map(swap);
+  state.departed = state.departed.map(swap);
 
-  // Swap in turnOrder
-  const turnIdx = state.turnOrder.indexOf(oldId);
-  if (turnIdx !== -1) {
-    state.turnOrder[turnIdx] = newId;
-  }
-
-  // Swap in cumulativeScores
   if (state.cumulativeScores[oldId] !== undefined) {
     state.cumulativeScores[newId] = state.cumulativeScores[oldId];
     delete state.cumulativeScores[oldId];
   }
 
-  // Swap in pendingAction
   if (state.pendingAction) {
-    if (state.pendingAction.drawerId === oldId) {
-      state.pendingAction.drawerId = newId;
-    }
-    state.pendingAction.eligibleTargets = state.pendingAction.eligibleTargets.map(
-      id => id === oldId ? newId : id
-    );
+    state.pendingAction.drawerId = swap(state.pendingAction.drawerId);
+    state.pendingAction.eligibleTargets = state.pendingAction.eligibleTargets.map(swap);
   }
 
-  // Swap in pendingModifier
-  if (state.pendingModifier) {
-    if (state.pendingModifier.drawerId === oldId) {
-      state.pendingModifier.drawerId = newId;
-    }
-    state.pendingModifier.eligibleTargets = state.pendingModifier.eligibleTargets.map(
-      id => id === oldId ? newId : id
-    );
-  }
-
-  // Swap in chaosChoices
   if (state.chaosChoices && state.chaosChoices[oldId] !== undefined) {
     state.chaosChoices[newId] = state.chaosChoices[oldId];
     delete state.chaosChoices[oldId];
   }
 
-  // Swap in flipSevenAchievedBy
-  if (state.flipSevenAchievedBy === oldId) {
-    state.flipSevenAchievedBy = newId;
-  }
+  if (state.flipSevenAchievedBy === oldId) state.flipSevenAchievedBy = newId;
+  if (state.lastWinnerId === oldId) state.lastWinnerId = newId;
 
-  // Swap in activityLog
-  for (const entry of state.activityLog) {
-    if (entry.playerId === oldId) {
-      entry.playerId = newId;
-    }
+  for (const entry of state.activityLog) entry.playerId = swap(entry.playerId);
+  if (state.lastRoundScores) {
+    for (const s of state.lastRoundScores) s.playerId = swap(s.playerId);
+  }
+  for (const round of state.roundHistory) {
+    for (const s of round.scores) s.playerId = swap(s.playerId);
   }
 
   console.log(`[Flip7] Swapped player ID ${oldId} → ${newId} in room ${roomCode}`);
 }
 
-// ---- Public API: handleDisconnectedTurn ----
+// ---- Public API: departures ----
 
-export function handleDisconnectedTurn(roomCode: string): 'continue' | 'roundEnd' | null {
+/**
+ * A player left the room for good (explicit leave or zombie cleanup). They sit
+ * out the rest of the game. Returns how the turn flow changed: 'none' when
+ * nothing else needs to happen, or null when there's no game / unknown player.
+ */
+export function markDeparted(roomCode: string, playerId: string): 'none' | TurnOutcome | null {
   const state = games.get(roomCode);
-  if (!state || state.phase !== 'playing') return null;
+  if (!state || !state.playerData[playerId]) return null;
+  if (!state.departed.includes(playerId)) state.departed.push(playerId);
+  if (state.phase !== 'playing') return 'none';
 
-  const currentPlayerId = state.turnOrder[state.currentPlayerIndex];
-  const pd = state.playerData[currentPlayerId];
-  if (!pd || pd.roundStatus !== 'active') return null;
+  const pd = state.playerData[playerId];
+  const wasCurrent = state.settings.mode === 'classic' && state.turnOrder[state.currentPlayerIndex] === playerId;
 
-  // If player has no cards, skip their turn
-  if (pd.numberCards.length === 0 && pd.modifiers.length === 0 && pd.secondChances === 0) {
-    return advanceTurn(state);
+  if (state.pendingAction) {
+    if (state.pendingAction.drawerId === playerId) {
+      state.pendingAction = null; // their action card fizzles
+    } else {
+      state.pendingAction.eligibleTargets = state.pendingAction.eligibleTargets.filter(id => id !== playerId);
+    }
   }
+  if (state.chaosChoices) delete state.chaosChoices[playerId];
 
-  // Auto-stay
+  if (pd.roundStatus !== 'active') return 'none';
   pd.roundStatus = 'stayed';
-  return advanceTurn(state);
+
+  if (state.flipSevenAchievedBy) return 'none'; // round already ending
+  const anyActive = getActivePlayers(state).length > 0;
+  if (state.settings.mode === 'chaos') return anyActive ? 'continue' : 'roundEnd';
+  if (wasCurrent) return advanceTurn(state);
+  return anyActive ? 'none' : 'roundEnd';
+}
+
+// ---- Public API: who is the game waiting on? ----
+
+/** True if play is blocked waiting for this player's input right now. */
+export function isAwaitingPlayer(roomCode: string, playerId: string): boolean {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'playing' || state.flipSevenAchievedBy) return false;
+  if (state.pendingAction) return state.pendingAction.drawerId === playerId;
+
+  const pd = state.playerData[playerId];
+  if (!pd || pd.roundStatus !== 'active') return false;
+  if (state.settings.mode === 'classic') return state.turnOrder[state.currentPlayerIndex] === playerId;
+  return !state.chaosChoices?.[playerId];
+}
+
+export function getAwaitedPlayers(roomCode: string): string[] {
+  const state = games.get(roomCode);
+  if (!state) return [];
+  return state.turnOrder.filter(id => isAwaitingPlayer(roomCode, id));
+}
+
+export function getCurrentPlayerId(roomCode: string): string | null {
+  const state = games.get(roomCode);
+  if (!state || state.phase !== 'playing' || state.settings.mode !== 'classic') return null;
+  return state.turnOrder[state.currentPlayerIndex] || null;
 }
 
 // ---- Public API: getGameState ----
@@ -866,18 +756,9 @@ export function addActivityLog(roomCode: string, entry: ActivityLogEntry): void 
   const state = games.get(roomCode);
   if (!state) return;
   state.activityLog.push(entry);
-  // Keep last 50 entries
   if (state.activityLog.length > 50) {
     state.activityLog = state.activityLog.slice(-50);
   }
-}
-
-// ---- Public API: getCurrentPlayerId ----
-
-export function getCurrentPlayerId(roomCode: string): string | null {
-  const state = games.get(roomCode);
-  if (!state || state.phase !== 'playing') return null;
-  return state.turnOrder[state.currentPlayerIndex] || null;
 }
 
 // ---- Timer Management ----
@@ -891,7 +772,6 @@ export function clearRoomTimer(roomCode: string): void {
   const existing = activeTimers.get(roomCode);
   if (existing) {
     clearInterval(existing);
-    clearTimeout(existing);
     activeTimers.delete(roomCode);
   }
 }

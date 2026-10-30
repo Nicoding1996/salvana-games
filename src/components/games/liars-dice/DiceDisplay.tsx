@@ -102,13 +102,19 @@ export default function DiceDisplay({ dice, phase, wildOnes, onRollComplete, hig
     };
   }, [isRollingPhase, rolled, triggerRoll]);
 
-  // Reset state on new round (phase changes to rolling)
-  useEffect(() => {
+  // Reset state on new round (phase changes to rolling) — adjusted during render, not in an effect
+  const [prevRollingPhase, setPrevRollingPhase] = useState(isRollingPhase);
+  if (isRollingPhase !== prevRollingPhase) {
+    setPrevRollingPhase(isRollingPhase);
     if (isRollingPhase) {
       setRolled(false);
       setRolling(false);
-      shakeDetected.current = false;
     }
+  }
+
+  // New round: allow a fresh shake / auto-roll (refs can only be written outside render)
+  useEffect(() => {
+    if (isRollingPhase) shakeDetected.current = false;
   }, [isRollingPhase]);
 
   // Sort dice for display: group same values together

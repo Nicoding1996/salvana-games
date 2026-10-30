@@ -184,9 +184,9 @@ export const CATEGORY_INFO: Record<GameCategory, { label: string; emoji: string 
   deduction: { label: 'Deduction', emoji: '🔍' },
 };
 
-/** Get difficulty display info */
+/** Get difficulty display info (color is a CSS value using design tokens) */
 export const DIFFICULTY_INFO: Record<GameDifficulty, { label: string; color: string }> = {
-  casual: { label: 'Easy', color: '#5ee89e' },
-  moderate: { label: 'Medium', color: '#f0a050' },
-  strategic: { label: 'Hard', color: '#e74c3c' },
+  casual: { label: 'Easy', color: 'var(--success)' },
+  moderate: { label: 'Medium', color: 'var(--brand)' },
+  strategic: { label: 'Hard', color: 'var(--danger)' },
 };

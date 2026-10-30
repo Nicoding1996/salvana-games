@@ -10,7 +10,6 @@ import type {
   ShotResult,
   ShotEntry,
   CellState,
-  ServerShipState,
 } from '@/types/games/battleship';
 import { DEFAULT_BATTLESHIP_SETTINGS, SHIPS } from '@/types/games/battleship';
 

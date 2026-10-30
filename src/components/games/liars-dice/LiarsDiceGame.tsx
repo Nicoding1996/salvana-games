@@ -27,7 +27,6 @@ export default function LiarsDiceGame({ roomHook }: LiarsDiceGameProps) {
     placeBid,
     callLiar,
     callSpotOn,
-    nextRound,
     endGame,
     rematch,
   } = useLiarsDice();

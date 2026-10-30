@@ -7,7 +7,7 @@ import Lobby from '@/components/hub/Lobby';
 import StoryThiefGame from '@/components/games/story-thief/StoryThiefGame';
 import LiarsDiceGame from '@/components/games/liars-dice/LiarsDiceGame';
 import BattleshipGame from '@/components/games/battleship/BattleshipGame';
-import { PokerGame } from '@/components/games/poker/PokerGame';
+import PokerGame from '@/components/games/poker/PokerGame';
 import Flip7Game from '@/components/games/flip7/Flip7Game';
 
 export default function RoomPage() {
@@ -133,7 +133,7 @@ export default function RoomPage() {
       ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'battleship' ? (
         <BattleshipGame roomHook={roomHook} />
       ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'poker' ? (
-        <PokerGame />
+        <PokerGame roomHook={roomHook} />
       ) : (room.phase === 'playing' || room.phase === 'finished') && room.currentGameId === 'flip7' ? (
         <Flip7Game roomHook={roomHook} />
       ) : (

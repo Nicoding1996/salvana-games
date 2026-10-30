@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import type { useRoom } from '@/lib/hub/useRoom';
 import type { RoundMode } from '@/types/hub';
@@ -15,7 +16,66 @@ import type { Flip7Settings } from '@/types/games/flip7';
 import { DEFAULT_FLIP7_SETTINGS } from '@/types/games/flip7';
 import QRCode from '@/components/shared/QRCode';
 import { GameSelector } from '@/components/hub/GameCard';
+import { LogOutIcon } from '@/components/shared/Icons';
 import { GAME_REGISTRY, getGameById, getDefaultGame } from '@/lib/gameRegistry';
+
+/* ============================================
+   Settings option lists — values must match the settings types
+   ============================================ */
+
+interface Option<T> {
+  value: T;
+  label: string;
+}
+
+function timerOptions<T extends number>(values: readonly T[]): Option<T>[] {
+  return values.map((s) => ({ value: s, label: s === 0 ? 'Off' : `${s}s` }));
+}
+
+const TEAM_COUNT_OPTIONS: Option<2 | 3>[] = [{ value: 2, label: '2' }, { value: 3, label: '3' }];
+const ROUND_MODE_OPTIONS: Option<RoundMode>[] = [
+  { value: 'timed', label: '⏱ Timed' },
+  { value: 'freeFlow', label: '🌊 Free' },
+];
+const ROUND_TIMER_OPTIONS: Option<number>[] = [30, 60, 90, 120].map((s) => ({ value: s, label: `${s}s` }));
+
+const DICE_LIVES_OPTIONS: Option<2 | 3>[] = [{ value: 2, label: '❤️❤️' }, { value: 3, label: '❤️❤️❤️' }];
+const DICE_TIMER_OPTIONS = timerOptions([15, 30, 45, 0] as const);
+
+const GRID_SIZE_OPTIONS: Option<8 | 10>[] = [{ value: 8, label: '8×8' }, { value: 10, label: '10×10' }];
+const SHOT_MODE_OPTIONS: Option<'salvo' | 'classic'>[] = [
+  { value: 'salvo', label: '💣 Salvo' },
+  { value: 'classic', label: '🎯 Classic' },
+];
+const BATTLESHIP_TIMER_OPTIONS = timerOptions([15, 30, 45, 0] as const);
+const PLACEMENT_TIMER_OPTIONS = timerOptions([30, 60, 0] as const);
+
+const CHIP_OPTIONS: Option<500 | 1000 | 2000>[] = [
+  { value: 500, label: '500' },
+  { value: 1000, label: '1000' },
+  { value: 2000, label: '2000' },
+];
+const BLIND_SPEED_OPTIONS: Option<'slow' | 'normal' | 'fast'>[] = [
+  { value: 'slow', label: 'Slow' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'fast', label: 'Fast' },
+];
+const STARTING_BLIND_OPTIONS: Option<'10/20' | '25/50'>[] = [
+  { value: '10/20', label: '10/20' },
+  { value: '25/50', label: '25/50' },
+];
+const POKER_TIMER_OPTIONS = timerOptions([15, 30, 45, 0] as const);
+
+const TARGET_SCORE_OPTIONS: Option<100 | 200 | 300>[] = [
+  { value: 100, label: '100' },
+  { value: 200, label: '200' },
+  { value: 300, label: '300' },
+];
+const FLIP7_TIMER_OPTIONS = timerOptions([10, 15, 30, 0] as const);
+const FLIP7_MODE_OPTIONS: Option<'classic' | 'chaos'>[] = [
+  { value: 'classic', label: 'Classic' },
+  { value: 'chaos', label: 'Chaos' },
+];
 
 interface LobbyProps {
   roomHook: ReturnType<typeof useRoom>;
@@ -40,18 +100,12 @@ export default function Lobby({ roomHook }: LobbyProps) {
   const selectedGameDef = getGameById(selectedGame) || getDefaultGame();
   const isFreeForAll = !selectedGameDef.isTeamGame;
 
-  // Max player check using game-specific settings where applicable
-  const getMaxPlayers = (): number => {
-    if (selectedGame === 'liars-dice') return diceSettings.maxPlayers;
-    if (selectedGame === 'battleship') return battleshipSettings.maxPlayers;
-    if (selectedGame === 'poker') return pokerSettings.maxPlayers;
-    if (selectedGame === 'flip7') return flip7Settings.maxPlayers;
-    return selectedGameDef.maxPlayers;
-  };
-  const maxPlayersForSelected = getMaxPlayers();
+  // Player limits come from the registry, so the selector, the player list and the start button all agree
+  const maxPlayersForSelected = selectedGameDef.maxPlayers;
   const tooMany = playerCount > maxPlayersForSelected;
   const canStart = playerCount >= selectedGameDef.minPlayers && !tooMany;
   const roomUrl = typeof window !== 'undefined' ? `${window.location.origin}/room/${room.code}` : '';
+  const hostName = room.players[room.hostId]?.name;
 
   const handleLeave = () => {
     leaveRoom();
@@ -92,14 +146,15 @@ export default function Lobby({ roomHook }: LobbyProps) {
   };
 
   const handleStart = () => {
+    const maxPlayers = selectedGameDef.maxPlayers;
     if (selectedGame === 'liars-dice') {
-      startGame('liars-dice', diceSettings);
+      startGame('liars-dice', { ...diceSettings, maxPlayers });
     } else if (selectedGame === 'battleship') {
-      startGame('battleship', battleshipSettings);
+      startGame('battleship', { ...battleshipSettings, maxPlayers });
     } else if (selectedGame === 'poker') {
-      startGame('poker', pokerSettings);
+      startGame('poker', { ...pokerSettings, maxPlayers });
     } else if (selectedGame === 'flip7') {
-      startGame('flip7', flip7Settings);
+      startGame('flip7', { ...flip7Settings, maxPlayers });
     } else {
       startGame('story-thief');
     }
@@ -108,7 +163,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
   const playersNeeded = selectedGameDef.minPlayers - playerCount;
 
   return (
-    <div className="flex-1 flex flex-col p-4 max-w-lg mx-auto w-full">
+    <div className="flex-1 flex flex-col px-4 pt-4 max-w-lg mx-auto w-full" data-game={selectedGameDef.dataGameAttr}>
       {/* Room Code — tap to show QR */}
       <div className="text-center mb-5 animate-fade-in">
         <p className="text-[10px] uppercase tracking-[0.2em] text-(--text-muted) mb-1">Room Code</p>
@@ -186,7 +241,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
       )}
 
       {/* ============================================
-          GAME SELECTOR — Horizontal pills + detail
+          GAME SELECTOR — tile grid (host) + selected game card
           ============================================ */}
       <GameSelector
         games={GAME_REGISTRY}
@@ -281,7 +336,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
         <div className="bg-(--bg-card) border border-(--border) rounded-xl p-3.5 mb-5 flex-1 overflow-y-auto">
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-medium text-sm text-(--text-primary)">Players</h3>
-            <span className="text-xs text-(--text-muted)">
+            <span className={`text-xs ${tooMany ? 'text-(--danger) font-medium' : 'text-(--text-muted)'}`}>
               {playerCount}/{maxPlayersForSelected}
             </span>
           </div>
@@ -313,461 +368,315 @@ export default function Lobby({ roomHook }: LobbyProps) {
         </div>
       )}
 
-      {/* Settings (Host only) — Whose Truth? */}
+      {/* ============================================
+          SETTINGS (host only) — panel swaps with the selected game.
+          Active options use --game-accent, which follows the selected game via data-game.
+          ============================================ */}
+
       {isHost && !isFreeForAll && (
-        <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
-          <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Settings</h3>
-
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-(--text-secondary)">Teams</span>
-            <div className="flex gap-1.5">
-              {([2, 3] as const).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => updateSettings({ teamCount: n })}
-                  className={`px-3.5 py-1.5 rounded-lg text-sm transition-all ${
-                    room.settings.teamCount === n
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-(--text-secondary)">Mode</span>
-            <div className="flex gap-1.5">
-              {([
-                { value: 'timed' as RoundMode, label: '⏱ Timed' },
-                { value: 'freeFlow' as RoundMode, label: '🌊 Free' },
-              ]).map(({ value, label }) => (
-                <button
-                  key={value}
-                  onClick={() => updateSettings({ roundMode: value })}
-                  className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                    room.settings.roundMode === value
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
+        <SettingsCard title="Settings">
+          <SettingRow label="Teams">
+            <OptionGroup
+              label="Number of teams"
+              options={TEAM_COUNT_OPTIONS}
+              value={room.settings.teamCount}
+              onChange={(teamCount) => updateSettings({ teamCount })}
+            />
+          </SettingRow>
+          <SettingRow label="Mode">
+            <OptionGroup
+              label="Round mode"
+              options={ROUND_MODE_OPTIONS}
+              value={room.settings.roundMode}
+              onChange={(roundMode) => updateSettings({ roundMode })}
+            />
+          </SettingRow>
           {room.settings.roundMode === 'timed' && (
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-(--text-secondary)">Timer</span>
-              <div className="flex gap-1.5">
-                {[30, 60, 90, 120].map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => updateSettings({ timerSeconds: s })}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs transition-all ${
-                      room.settings.timerSeconds === s
-                        ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                        : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                    }`}
-                  >
-                    {s}s
-                  </button>
-                ))}
-              </div>
+            <SettingRow label="Timer">
+              <OptionGroup
+                label="Question timer"
+                options={ROUND_TIMER_OPTIONS}
+                value={room.settings.timerSeconds}
+                onChange={(timerSeconds) => updateSettings({ timerSeconds })}
+              />
+            </SettingRow>
+          )}
+        </SettingsCard>
+      )}
+
+      {isHost && selectedGame === 'liars-dice' && (
+        <SettingsCard title="Dice Settings">
+          <SettingRow label="Lives">
+            <OptionGroup
+              label="Lives"
+              options={DICE_LIVES_OPTIONS}
+              value={diceSettings.lives}
+              onChange={(lives) => setDiceSettings((s) => ({ ...s, lives }))}
+            />
+          </SettingRow>
+          <SettingRow label="Turn timer">
+            <OptionGroup
+              label="Turn timer"
+              options={DICE_TIMER_OPTIONS}
+              value={diceSettings.turnTimer}
+              onChange={(turnTimer) => setDiceSettings((s) => ({ ...s, turnTimer }))}
+            />
+          </SettingRow>
+          <SettingRow label="Wild ⚀" hint="1s count as any face">
+            <Toggle
+              label="Wild ones"
+              checked={diceSettings.wildOnes}
+              onChange={(wildOnes) => setDiceSettings((s) => ({ ...s, wildOnes }))}
+            />
+          </SettingRow>
+          <SettingRow label="Spot On 🎯" hint="Call exact bid">
+            <Toggle
+              label="Spot On"
+              checked={diceSettings.spotOn}
+              onChange={(spotOn) => setDiceSettings((s) => ({ ...s, spotOn }))}
+            />
+          </SettingRow>
+        </SettingsCard>
+      )}
+
+      {isHost && selectedGame === 'battleship' && (
+        <SettingsCard title="Battleship Settings">
+          <SettingRow label="Grid size">
+            <OptionGroup
+              label="Grid size"
+              options={GRID_SIZE_OPTIONS}
+              value={battleshipSettings.gridSize}
+              onChange={(gridSize) => setBattleshipSettings((s) => ({ ...s, gridSize }))}
+            />
+          </SettingRow>
+          <SettingRow label="Shots" hint="Salvo = shots per ship">
+            <OptionGroup
+              label="Shot mode"
+              options={SHOT_MODE_OPTIONS}
+              value={battleshipSettings.shotMode}
+              onChange={(shotMode) => setBattleshipSettings((s) => ({ ...s, shotMode }))}
+            />
+          </SettingRow>
+          <SettingRow label="Turn timer">
+            <OptionGroup
+              label="Turn timer"
+              options={BATTLESHIP_TIMER_OPTIONS}
+              value={battleshipSettings.turnTimer}
+              onChange={(turnTimer) => setBattleshipSettings((s) => ({ ...s, turnTimer }))}
+            />
+          </SettingRow>
+          <SettingRow label="Place timer">
+            <OptionGroup
+              label="Placement timer"
+              options={PLACEMENT_TIMER_OPTIONS}
+              value={battleshipSettings.placementTimer}
+              onChange={(placementTimer) => setBattleshipSettings((s) => ({ ...s, placementTimer }))}
+            />
+          </SettingRow>
+          <SettingRow label="Sonar 📡" hint="Scan 2×2 area once">
+            <Toggle
+              label="Sonar ping"
+              checked={battleshipSettings.sonarPing}
+              onChange={(sonarPing) => setBattleshipSettings((s) => ({ ...s, sonarPing }))}
+            />
+          </SettingRow>
+        </SettingsCard>
+      )}
+
+      {isHost && selectedGame === 'poker' && (
+        <SettingsCard title="Poker Settings">
+          <SettingRow label="Chips 🪙" hint="Starting stack">
+            <OptionGroup
+              label="Starting chips"
+              options={CHIP_OPTIONS}
+              value={pokerSettings.startingChips}
+              onChange={(startingChips) => setPokerSettings((s) => ({ ...s, startingChips }))}
+            />
+          </SettingRow>
+          <SettingRow label="Blinds" hint="Speed of increases">
+            <OptionGroup
+              label="Blind speed"
+              options={BLIND_SPEED_OPTIONS}
+              value={pokerSettings.blindStructure}
+              onChange={(blindStructure) => setPokerSettings((s) => ({ ...s, blindStructure }))}
+            />
+          </SettingRow>
+          <SettingRow label="Start blinds">
+            <OptionGroup
+              label="Starting blinds"
+              options={STARTING_BLIND_OPTIONS}
+              value={pokerSettings.startingBlinds}
+              onChange={(startingBlinds) => setPokerSettings((s) => ({ ...s, startingBlinds }))}
+            />
+          </SettingRow>
+          <SettingRow label="Turn timer">
+            <OptionGroup
+              label="Turn timer"
+              options={POKER_TIMER_OPTIONS}
+              value={pokerSettings.turnTimer}
+              onChange={(turnTimer) => setPokerSettings((s) => ({ ...s, turnTimer }))}
+            />
+          </SettingRow>
+          <SettingRow label="Bounty 💀" hint="Track eliminations">
+            <Toggle
+              label="Bounty mode"
+              checked={pokerSettings.bountyMode}
+              onChange={(bountyMode) => setPokerSettings((s) => ({ ...s, bountyMode }))}
+            />
+          </SettingRow>
+        </SettingsCard>
+      )}
+
+      {isHost && selectedGame === 'flip7' && (
+        <SettingsCard title="Flip 7 Settings">
+          <SettingRow label="Target score" hint="First to reach wins">
+            <OptionGroup
+              label="Target score"
+              options={TARGET_SCORE_OPTIONS}
+              value={flip7Settings.targetScore}
+              onChange={(targetScore) => setFlip7Settings((s) => ({ ...s, targetScore }))}
+            />
+          </SettingRow>
+          <SettingRow label="Turn timer" hint="Auto-stay on expire">
+            <OptionGroup
+              label="Turn timer"
+              options={FLIP7_TIMER_OPTIONS}
+              value={flip7Settings.turnTimer}
+              onChange={(turnTimer) => setFlip7Settings((s) => ({ ...s, turnTimer }))}
+            />
+          </SettingRow>
+          <SettingRow label="Mode" hint="Classic = turns, Chaos = simultaneous">
+            <OptionGroup
+              label="Game mode"
+              options={FLIP7_MODE_OPTIONS}
+              value={flip7Settings.mode}
+              onChange={(mode) => setFlip7Settings((s) => ({ ...s, mode }))}
+            />
+          </SettingRow>
+        </SettingsCard>
+      )}
+
+      {/* Start / Wait — anchored to the bottom of the screen */}
+      <div className="sticky bottom-0 z-20 -mx-4 mt-auto px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))] bg-linear-to-t from-(--bg-primary) from-70% to-transparent">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleLeave}
+            className="h-14 shrink-0 px-4 rounded-2xl flex items-center gap-2 bg-(--bg-card) border border-(--border-light) text-sm font-medium text-(--text-secondary) hover:text-(--text-primary) active:scale-[0.97] transition-[transform,color]"
+          >
+            <LogOutIcon size={16} />
+            Leave
+          </button>
+
+          {isHost ? (
+            <button
+              type="button"
+              onClick={handleStart}
+              disabled={!canStart}
+              className="flex-1 min-w-0 h-14 px-4 rounded-2xl bg-(--game-accent) text-(--bg-primary) font-heading text-base font-semibold truncate transition-[transform,opacity] active:scale-[0.97] disabled:opacity-35 disabled:active:scale-100"
+            >
+              {canStart
+                ? `${selectedGameDef.icon} Start ${selectedGameDef.name}`
+                : tooMany
+                  ? `Too many players (max ${maxPlayersForSelected})`
+                  : `Need ${playersNeeded} more player${playersNeeded !== 1 ? 's' : ''}`
+              }
+            </button>
+          ) : (
+            <div
+              className="flex-1 min-w-0 h-14 px-4 rounded-2xl border border-dashed border-(--border-light) flex items-center justify-center gap-2 text-sm text-(--text-secondary)"
+              role="status"
+            >
+              <span className="w-2 h-2 shrink-0 rounded-full bg-(--game-accent) animate-soft-pulse" aria-hidden="true" />
+              <span className="truncate">Waiting for {hostName ?? 'the host'}</span>
             </div>
           )}
         </div>
-      )}
-
-      {/* Liar's Dice Settings (Host only) */}
-      {isHost && selectedGame === 'liars-dice' && (
-        <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
-          <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Dice Settings</h3>
-
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-(--text-secondary)">Lives</span>
-            <div className="flex gap-1.5">
-              {([2, 3] as const).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setDiceSettings(s => ({ ...s, lives: n }))}
-                  className={`px-3.5 py-1.5 rounded-lg text-sm transition-all ${
-                    diceSettings.lives === n
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {'❤️'.repeat(n)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-(--text-secondary)">Turn Timer</span>
-            <div className="flex gap-1.5">
-              {([15, 30, 45, 0] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setDiceSettings(prev => ({ ...prev, turnTimer: s }))}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs transition-all ${
-                    diceSettings.turnTimer === s
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {s === 0 ? 'Off' : `${s}s`}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <span className="text-sm text-(--text-secondary)">Wild ⚀</span>
-              <p className="text-[10px] text-(--text-muted)">1s count as any face</p>
-            </div>
-            <button
-              onClick={() => setDiceSettings(s => ({ ...s, wildOnes: !s.wildOnes }))}
-              className={`px-3.5 py-1.5 rounded-lg text-sm transition-all ${
-                diceSettings.wildOnes
-                  ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                  : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-              }`}
-            >
-              {diceSettings.wildOnes ? 'On' : 'Off'}
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-sm text-(--text-secondary)">Spot On 🎯</span>
-              <p className="text-[10px] text-(--text-muted)">Call exact bid</p>
-            </div>
-            <button
-              onClick={() => setDiceSettings(s => ({ ...s, spotOn: !s.spotOn }))}
-              className={`px-3.5 py-1.5 rounded-lg text-sm transition-all ${
-                diceSettings.spotOn
-                  ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                  : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-              }`}
-            >
-              {diceSettings.spotOn ? 'On' : 'Off'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Battleship Settings (Host only) */}
-      {isHost && selectedGame === 'battleship' && (
-        <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
-          <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Battleship Settings</h3>
-
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-(--text-secondary)">Grid Size</span>
-            <div className="flex gap-1.5">
-              {([8, 10] as const).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setBattleshipSettings(s => ({ ...s, gridSize: n }))}
-                  className={`px-3.5 py-1.5 rounded-lg text-sm transition-all ${
-                    battleshipSettings.gridSize === n
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {n}×{n}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <span className="text-sm text-(--text-secondary)">Shots</span>
-              <p className="text-[10px] text-(--text-muted)">Salvo = shots per ship</p>
-            </div>
-            <div className="flex gap-1.5">
-              {(['salvo', 'classic'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setBattleshipSettings(s => ({ ...s, shotMode: mode }))}
-                  className={`px-3 py-1.5 rounded-lg text-xs transition-all ${
-                    battleshipSettings.shotMode === mode
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {mode === 'salvo' ? '💣 Salvo' : '🎯 Classic'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-(--text-secondary)">Turn Timer</span>
-            <div className="flex gap-1.5">
-              {([15, 30, 45, 0] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setBattleshipSettings(prev => ({ ...prev, turnTimer: s }))}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs transition-all ${
-                    battleshipSettings.turnTimer === s
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {s === 0 ? 'Off' : `${s}s`}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-(--text-secondary)">Place Timer</span>
-            <div className="flex gap-1.5">
-              {([30, 60, 0] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setBattleshipSettings(prev => ({ ...prev, placementTimer: s }))}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs transition-all ${
-                    battleshipSettings.placementTimer === s
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {s === 0 ? 'Off' : `${s}s`}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-sm text-(--text-secondary)">Sonar 📡</span>
-              <p className="text-[10px] text-(--text-muted)">Scan 2×2 area once</p>
-            </div>
-            <button
-              onClick={() => setBattleshipSettings(s => ({ ...s, sonarPing: !s.sonarPing }))}
-              className={`px-3.5 py-1.5 rounded-lg text-sm transition-all ${
-                battleshipSettings.sonarPing
-                  ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                  : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-              }`}
-            >
-              {battleshipSettings.sonarPing ? 'On' : 'Off'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Poker Settings (Host only) */}
-      {isHost && selectedGame === 'poker' && (
-        <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
-          <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Poker Settings</h3>
-
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-(--text-secondary)">Chips</span>
-            <div className="flex gap-1.5">
-              {([500, 1000, 2000] as const).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setPokerSettings(s => ({ ...s, startingChips: n }))}
-                  className={`px-3 py-1.5 rounded-lg text-xs transition-all ${
-                    pokerSettings.startingChips === n
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  🪙{n}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <span className="text-sm text-(--text-secondary)">Blinds</span>
-              <p className="text-[10px] text-(--text-muted)">Speed of increases</p>
-            </div>
-            <div className="flex gap-1.5">
-              {(['slow', 'normal', 'fast'] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setPokerSettings(prev => ({ ...prev, blindStructure: s }))}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs transition-all capitalize ${
-                    pokerSettings.blindStructure === s
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-(--text-secondary)">Start</span>
-            <div className="flex gap-1.5">
-              {(['10/20', '25/50'] as const).map((b) => (
-                <button
-                  key={b}
-                  onClick={() => setPokerSettings(s => ({ ...s, startingBlinds: b }))}
-                  className={`px-3 py-1.5 rounded-lg text-xs transition-all ${
-                    pokerSettings.startingBlinds === b
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {b}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm text-(--text-secondary)">Turn Timer</span>
-            <div className="flex gap-1.5">
-              {([15, 30, 45, 0] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setPokerSettings(prev => ({ ...prev, turnTimer: s }))}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs transition-all ${
-                    pokerSettings.turnTimer === s
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {s === 0 ? 'Off' : `${s}s`}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-sm text-(--text-secondary)">Bounty 💀</span>
-              <p className="text-[10px] text-(--text-muted)">Track eliminations</p>
-            </div>
-            <button
-              onClick={() => setPokerSettings(s => ({ ...s, bountyMode: !s.bountyMode }))}
-              className={`px-3.5 py-1.5 rounded-lg text-sm transition-all ${
-                pokerSettings.bountyMode
-                  ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                  : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-              }`}
-            >
-              {pokerSettings.bountyMode ? 'On' : 'Off'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Flip 7 Settings (Host only) */}
-      {isHost && selectedGame === 'flip7' && (
-        <div className="bg-(--bg-card) border border-(--border) rounded-xl p-4 mb-4">
-          <h3 className="text-[10px] uppercase tracking-[0.15em] text-(--text-muted) mb-3">Flip 7 Settings</h3>
-
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <p className="text-xs font-medium text-(--text-primary)">Target Score</p>
-              <p className="text-[10px] text-(--text-muted)">First to reach wins</p>
-            </div>
-            <div className="flex gap-1.5">
-              {([100, 200, 300] as const).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setFlip7Settings(s => ({ ...s, targetScore: n }))}
-                  className={`px-3 py-1.5 rounded-lg text-xs transition-all ${
-                    flip7Settings.targetScore === n
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <p className="text-xs font-medium text-(--text-primary)">Turn Timer</p>
-              <p className="text-[10px] text-(--text-muted)">Auto-stay on expire</p>
-            </div>
-            <div className="flex gap-1.5">
-              {([10, 15, 30, 0] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setFlip7Settings(prev => ({ ...prev, turnTimer: s }))}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs transition-all ${
-                    flip7Settings.turnTimer === s
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {s === 0 ? 'Off' : `${s}s`}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-(--text-primary)">Mode</p>
-              <p className="text-[10px] text-(--text-muted)">Classic = turns, Chaos = simultaneous</p>
-            </div>
-            <div className="flex gap-1.5">
-              {(['classic', 'chaos'] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setFlip7Settings(prev => ({ ...prev, mode: m }))}
-                  className={`px-3 py-1.5 rounded-lg text-xs transition-all capitalize ${
-                    flip7Settings.mode === m
-                      ? 'bg-(--brand) text-(--bg-primary) font-medium'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border border-(--border)'
-                  }`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Start / Wait */}
-      <div className="space-y-2 pb-4">
-        {isHost ? (
-          <button
-            onClick={handleStart}
-            disabled={!canStart}
-            className="w-full py-4 bg-(--game-accent) text-(--bg-primary) disabled:opacity-30 rounded-xl text-base font-semibold transition-all active:scale-[0.97]"
-          >
-            {canStart
-              ? `${selectedGameDef.icon} Start ${selectedGameDef.name}`
-              : tooMany
-                ? `Too many players (max ${maxPlayersForSelected})`
-                : `Need ${playersNeeded} more player${playersNeeded !== 1 ? 's' : ''}`
-            }
-          </button>
-        ) : (
-          <div className="text-center py-4 text-(--text-muted) text-sm animate-soft-pulse">
-            Waiting for host...
-          </div>
-        )}
-
-        <button
-          onClick={handleLeave}
-          className="w-full py-2.5 text-(--text-muted) text-xs hover:text-(--text-secondary) transition-colors"
-        >
-          Leave Room
-        </button>
       </div>
     </div>
+  );
+}
+
+/* ============================================
+   Settings controls
+   ============================================ */
+
+function SettingsCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="bg-(--bg-card) border border-(--border) rounded-2xl p-4 mb-4 animate-fade-in" aria-label={title}>
+      <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-(--text-muted) mb-3">{title}</h3>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
+function SettingRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-(--text-primary)">{label}</p>
+        {hint && <p className="mt-0.5 text-xs text-(--text-muted)">{hint}</p>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Segmented control: one choice from a short list. */
+function OptionGroup<T extends string | number>({ label, options, value, onChange }: {
+  label: string;
+  options: readonly Option<T>[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex shrink-0 p-0.5 rounded-xl bg-(--bg-secondary) border border-(--border)">
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <button
+            key={String(option.value)}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(option.value)}
+            className={`min-h-11 min-w-11 px-2.5 rounded-[10px] text-sm whitespace-nowrap transition-colors ${
+              active
+                ? 'bg-(--game-accent) text-(--bg-primary) font-semibold shadow-sm'
+                : 'text-(--text-secondary) hover:text-(--text-primary)'
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** On/off switch with a 44px touch target. */
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className="shrink-0 w-14 h-11 -mr-1 flex items-center justify-center"
+    >
+      <span
+        className={`w-12 h-7 px-1 flex items-center rounded-full border transition-colors ${
+          checked ? 'bg-(--game-accent) border-transparent' : 'bg-(--bg-elevated) border-(--border-light)'
+        }`}
+        aria-hidden="true"
+      >
+        <span
+          className={`w-5 h-5 rounded-full shadow transition-transform ${
+            checked ? 'translate-x-5 bg-(--bg-primary)' : 'translate-x-0 bg-(--text-secondary)'
+          }`}
+        />
+      </span>
+    </button>
   );
 }

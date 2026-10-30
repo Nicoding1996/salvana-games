@@ -6,8 +6,8 @@ import type { Player, Room, RoomSettings } from './hub';
 import type { StoryThiefPhase } from './games/story-thief';
 import type { LiarsDiceClientState, ChallengeResult as LiarsDiceChallengeResult, LiarsDiceSettings } from './games/liars-dice';
 import type { BattleshipClientState, BattleshipSettings, ShipPlacement, Coordinate, ShotEntry } from './games/battleship';
-import type { PokerClientState, PokerSettings, ShowdownResult, PokerSuperlative } from './games/poker';
-import type { Flip7ClientState, Flip7Settings, Card as Flip7Card } from './games/flip7';
+import type { PokerClientState, PokerSettings, PokerTurnTimer, BettingAction } from './games/poker';
+import type { Flip7ClientState, Flip7Settings, Flip7FlipEvent, Flip7ActionEvent } from './games/flip7';
 
 // ---- Hub Events: Client → Server ----
 export interface ClientToServerEvents {
@@ -51,7 +51,7 @@ export interface ClientToServerEvents {
   'battleship:rematch': () => void;
 
   // Poker
-  'poker:action': (data: { action: 'fold' | 'check' | 'call' | 'raise' | 'allIn'; raiseAmount?: number }) => void;
+  'poker:action': (data: { action: BettingAction; raiseAmount?: number }) => void;  // raiseAmount = "raise to" total
   'poker:reaction': (data: { emoji: string }) => void;
   'poker:endGame': () => void;
   'poker:rematch': () => void;
@@ -60,7 +60,6 @@ export interface ClientToServerEvents {
   'flip7:hit': () => void;
   'flip7:stay': () => void;
   'flip7:useAction': (data: { targetId: string }) => void;
-  'flip7:giveModifier': (data: { targetId: string | null }) => void;
   'flip7:chaosChoice': (data: { choice: 'hit' | 'stay' }) => void;
   'flip7:nextRound': () => void;
   'flip7:endGame': () => void;
@@ -96,17 +95,16 @@ export interface ServerToClientEvents {
 
   // Poker
   'poker:stateUpdated': (state: PokerClientState) => void;
-  'poker:turnTimer': (secondsLeft: number) => void;
-  'poker:showdown': (result: ShowdownResult) => void;
+  'poker:turnTimer': (timer: PokerTurnTimer | null) => void;  // null = no clock running
+  'poker:actionRejected': (message: string) => void;
   'poker:reaction': (data: { playerId: string; emoji: string }) => void;
-  'poker:superlatives': (superlatives: PokerSuperlative[]) => void;
 
   // Flip 7
   'flip7:stateUpdated': (state: Flip7ClientState) => void;
-  'flip7:cardFlipped': (data: { playerId: string; playerName: string; card: Flip7Card; result: 'safe' | 'bust' | 'secondChance' }) => void;
-  'flip7:turnTimer': (secondsLeft: number) => void;
-  'flip7:roundEnd': (data: { scores: { playerId: string; roundScore: number; cumulativeScore: number; busted: boolean }[]; winnerId: string | null; flipSevenBy: string | null }) => void;
-  'flip7:actionUsed': (data: { type: 'freeze' | 'flipThree'; byId: string; byName: string; targetId: string; targetName: string }) => void;
+  'flip7:cardFlipped': (data: Flip7FlipEvent) => void;
+  'flip7:chaosFlips': (flips: Flip7FlipEvent[]) => void;
+  'flip7:turnTimer': (secondsLeft: number | null) => void;  // null = no countdown running
+  'flip7:actionUsed': (data: Flip7ActionEvent) => void;
 }
 
 // ---- Derived types for client state ----

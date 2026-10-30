@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import type { Room } from '@/types/hub';
 import { useStoryThief } from '@/lib/games/story-thief/useStoryThief';
 import WriteStory from './WriteStory';
@@ -71,13 +71,16 @@ export default function StoryThiefGame({ room, playerId, isHost, onLeaveRoom }: 
   // Auto-show the form when player owes a replacement (after leaving result screen, or in waiting state)
   const owesReplacement = gameState.needsReplacement && (gameState.phase !== 'result' || gameState.waitingForReplacement);
 
-  // Clear text when replacement is accepted by server
-  useEffect(() => {
-    if (!gameState.needsReplacement && replacementText.trim().length > 0) {
+  // Clear the form when the server accepts the replacement (needsReplacement turns off).
+  // Adjusted during render instead of in an effect.
+  const [prevNeedsReplacement, setPrevNeedsReplacement] = useState(gameState.needsReplacement);
+  if (gameState.needsReplacement !== prevNeedsReplacement) {
+    setPrevNeedsReplacement(gameState.needsReplacement);
+    if (!gameState.needsReplacement) {
       setReplacementText('');
       setShowReplacementForm(false);
     }
-  }, [gameState.needsReplacement, replacementText]);
+  }
 
   const handleSubmitReplacement = () => {
     if (replacementText.trim()) {
@@ -174,7 +177,6 @@ export default function StoryThiefGame({ room, playerId, isHost, onLeaveRoom }: 
             teamScores={gameState.teamScores}
             playerId={playerId}
             roundNumber={gameState.roundNumber}
-            totalStoriesLeft={gameState.totalStoriesLeft}
           />
         )}
 

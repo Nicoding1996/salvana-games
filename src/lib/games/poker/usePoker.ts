@@ -1,119 +1,156 @@
+'use client';
+
 // ============================================
 // Poker — Client Hook (Module-Level Singleton)
 // ============================================
+// Module state survives re-mounts and page navigation. Socket listeners are
+// bound once; components subscribe through useSyncExternalStore.
 
-import { useState, useEffect } from 'react';
+import { useSyncExternalStore } from 'react';
 import { getSocket } from '@/lib/socket/client';
-import type { PokerClientState, ShowdownResult, PokerSuperlative } from '@/types/games/poker';
+import type { Room } from '@/types/hub';
+import type {
+  PokerClientState, PokerTurnTimer, BettingAction, PokerReactionEmoji,
+} from '@/types/games/poker';
 
-// ---- Module-level state (survives re-mounts) ----
-let _state: PokerClientState | null = null;
-let _showdown: ShowdownResult | null = null;
-let _superlatives: PokerSuperlative[] = [];
-let _turnTimer: number | null = null;
-let _reactions: { playerId: string; emoji: string; timestamp: number }[] = [];
+export interface PokerReactionBubble {
+  id: number;
+  playerId: string;
+  emoji: string;
+}
+
+export interface PokerStore {
+  state: PokerClientState | null;
+  timer: PokerTurnTimer | null;          // clock of the current active player only
+  reactions: PokerReactionBubble[];      // one live bubble per player
+  notice: { id: number; text: string } | null;  // e.g. a rejected action
+  pending: boolean;                      // action sent, waiting for the server
+  cardsShown: boolean;                   // hole cards face-up (kept across hands)
+}
+
+const REACTION_MS = 2600;
+const NOTICE_MS = 2500;
+const PENDING_TIMEOUT_MS = 4000;
+
+const INITIAL: PokerStore = {
+  state: null,
+  timer: null,
+  reactions: [],
+  notice: null,
+  pending: false,
+  cardsShown: false,
+};
+
+let _store: PokerStore = INITIAL;
 let _bound = false;
+let _nextId = 1;
+let _pendingTimer: ReturnType<typeof setTimeout> | null = null;
+let _noticeTimer: ReturnType<typeof setTimeout> | null = null;
 const _listeners = new Set<() => void>();
 
-function notify() {
+function update(patch: Partial<PokerStore>): void {
+  _store = { ..._store, ...patch };
   for (const fn of _listeners) fn();
 }
 
-function resetState() {
-  _state = null;
-  _showdown = null;
-  _superlatives = [];
-  _turnTimer = null;
-  _reactions = [];
-  notify();
+function clearPendingTimer(): void {
+  if (_pendingTimer) {
+    clearTimeout(_pendingTimer);
+    _pendingTimer = null;
+  }
 }
 
-function ensureSocketBound() {
+function showNotice(text: string): void {
+  if (_noticeTimer) clearTimeout(_noticeTimer);
+  const id = _nextId++;
+  update({ notice: { id, text } });
+  _noticeTimer = setTimeout(() => {
+    if (_store.notice?.id === id) update({ notice: null });
+  }, NOTICE_MS);
+}
+
+function ensureSocketBound(): void {
   if (_bound) return;
   _bound = true;
-
   const socket = getSocket();
 
-  socket.on('poker:stateUpdated', (state: PokerClientState) => {
-    _state = state;
-    // Clear showdown when new hand starts
-    if (state.phase === 'preflop' || state.phase === 'dealing') {
-      _showdown = null;
+  socket.on('poker:stateUpdated', (state) => {
+    const wasMyTurn = _store.state?.isMyTurn ?? false;
+    if (state.isMyTurn && !wasMyTurn && typeof navigator !== 'undefined') {
+      navigator.vibrate?.(40);
     }
-    notify();
+    clearPendingTimer();
+    update({
+      state,
+      pending: false,
+      // A clock that belongs to someone no longer on the clock is stale
+      timer: _store.timer && _store.timer.playerId === state.activePlayerId ? _store.timer : null,
+    });
   });
 
-  // Clear poker state when room switches away from poker
-  socket.on('hub:roomUpdated', (room: { currentGameId?: string | null; phase?: string }) => {
-    if (_state && room.currentGameId !== 'poker') {
-      resetState();
-    }
+  socket.on('poker:turnTimer', (timer) => {
+    update({ timer });
   });
 
-  socket.on('poker:showdown', (result: ShowdownResult) => {
-    _showdown = result;
-    notify();
+  socket.on('poker:actionRejected', (message) => {
+    clearPendingTimer();
+    update({ pending: false });
+    showNotice(message);
   });
 
-  socket.on('poker:superlatives', (superlatives: PokerSuperlative[]) => {
-    _superlatives = superlatives;
-    notify();
-  });
-
-  socket.on('poker:turnTimer', (secondsLeft: number) => {
-    _turnTimer = secondsLeft;
-    notify();
-  });
-
-  socket.on('poker:reaction', (data: { playerId: string; emoji: string }) => {
-    _reactions = [..._reactions, { ...data, timestamp: Date.now() }];
-    // Auto-remove after 3s
+  socket.on('poker:reaction', ({ playerId, emoji }) => {
+    const bubble: PokerReactionBubble = { id: _nextId++, playerId, emoji };
+    update({ reactions: [..._store.reactions.filter(r => r.playerId !== playerId), bubble] });
     setTimeout(() => {
-      _reactions = _reactions.filter(r => Date.now() - r.timestamp < 3000);
-      notify();
-    }, 3000);
-    notify();
+      update({ reactions: _store.reactions.filter(r => r.id !== bubble.id) });
+    }, REACTION_MS);
+  });
+
+  // Room left poker (back to lobby or another game) — drop the table
+  socket.on('hub:roomUpdated', (room: Room) => {
+    if (_store.state && room.currentGameId !== 'poker') {
+      clearPendingTimer();
+      update({ ...INITIAL, cardsShown: _store.cardsShown });
+    }
   });
 }
 
-export function usePoker() {
-  const [, setTick] = useState(0);
-
-  useEffect(() => {
-    ensureSocketBound();
-
-    const listener = () => setTick(t => t + 1);
-    _listeners.add(listener);
-
-    // Immediate sync
-    listener();
-
-    // If no state yet, request it from server (handles race condition
-    // where state was broadcast before listeners were bound)
-    if (!_state) {
-      getSocket().emit('hub:requestState');
-    }
-
-    return () => {
-      _listeners.delete(listener);
-    };
-  }, []);
-
-  return {
-    state: _state,
-    showdown: _showdown,
-    superlatives: _superlatives,
-    turnTimer: _turnTimer,
-    reactions: _reactions,
-
-    // Actions
-    fold: () => getSocket().emit('poker:action', { action: 'fold' }),
-    check: () => getSocket().emit('poker:action', { action: 'check' }),
-    call: () => getSocket().emit('poker:action', { action: 'call' }),
-    raise: (amount: number) => getSocket().emit('poker:action', { action: 'raise', raiseAmount: amount }),
-    allIn: () => getSocket().emit('poker:action', { action: 'allIn' }),
-    sendReaction: (emoji: string) => getSocket().emit('poker:reaction', { emoji }),
-    endGame: () => getSocket().emit('poker:endGame'),
-    rematch: () => getSocket().emit('poker:rematch'),
+function subscribe(listener: () => void): () => void {
+  ensureSocketBound();
+  _listeners.add(listener);
+  // State may have been broadcast before we were listening
+  if (!_store.state) getSocket().emit('hub:requestState');
+  return () => {
+    _listeners.delete(listener);
   };
+}
+
+const getSnapshot = () => _store;
+const getServerSnapshot = () => INITIAL;
+
+function sendAction(action: BettingAction, raiseAmount?: number): void {
+  if (_store.pending || !_store.state?.isMyTurn) return;
+  update({ pending: true });
+  getSocket().emit('poker:action', raiseAmount === undefined ? { action } : { action, raiseAmount });
+  clearPendingTimer();
+  // Safety net: if no answer arrives (connection drop), unlock the buttons
+  _pendingTimer = setTimeout(() => update({ pending: false }), PENDING_TIMEOUT_MS);
+}
+
+const actions = {
+  fold: () => sendAction('fold'),
+  check: () => sendAction('check'),
+  call: () => sendAction('call'),
+  /** raiseTo = the total bet for this street after the raise */
+  raise: (raiseTo: number) => sendAction('raise', raiseTo),
+  allIn: () => sendAction('allIn'),
+  sendReaction: (emoji: PokerReactionEmoji) => getSocket().emit('poker:reaction', { emoji }),
+  setCardsShown: (shown: boolean) => update({ cardsShown: shown }),
+  endGame: () => getSocket().emit('poker:endGame'),
+  rematch: () => getSocket().emit('poker:rematch'),
+};
+
+export function usePoker() {
+  const store = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  return { ...store, ...actions };
 }
