@@ -2183,3 +2183,198 @@ input.input-code { font-size: 26px !important; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ============================================
+   READ THE ROOM — fuchsia accent, sunny yellow secondary
+   The dial's scoring bands blend from fuchsia (4 points) to yellow (2 points).
+   Team colors arrive through an inline --team custom property.
+   ============================================ */
+
+[data-game="read-the-room"] {
+  --game-accent: #e879f9;
+  --game-accent-dim: rgba(232, 121, 249, 0.10);
+  --game-accent-strong: #c026d3;
+  --game-secondary: #facc15;
+  --game-secondary-dim: rgba(250, 204, 21, 0.10);
+
+  /* Dial */
+  --rtr-face: var(--bg-elevated);
+  --rtr-track: var(--border-light);
+  --rtr-needle: var(--text-primary);
+  --rtr-band-4: var(--game-accent);
+  --rtr-band-3: color-mix(in srgb, var(--game-accent) 55%, var(--game-secondary));
+  --rtr-band-2: var(--game-secondary);
+}
+
+@layer components {
+  /* Panel with a fuchsia top-line accent (same pattern as .flip7-card) */
+  .rtr-card {
+    background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(31, 28, 50, 0.8) 100%), var(--bg-card);
+    border: 1px solid rgba(232, 121, 249, 0.15);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .rtr-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--game-accent), transparent);
+    opacity: 0.5;
+  }
+
+  /* Playing backdrop: fuchsia haze from the top, yellow from the bottom */
+  .rtr-table {
+    background:
+      radial-gradient(ellipse 90% 40% at 50% -5%, rgba(232, 121, 249, 0.07) 0%, transparent 60%),
+      radial-gradient(ellipse 70% 35% at 50% 105%, rgba(250, 204, 21, 0.05) 0%, transparent 60%);
+  }
+
+  .rtr-safe-bottom { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+
+  /* Primary actions stay anchored to the bottom while the content scrolls behind.
+     Solid behind the controls; it only fades across the top padding (pt-5). */
+  .rtr-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    background: linear-gradient(to top, var(--bg-primary) calc(100% - 1.25rem), transparent);
+  }
+
+  .rtr-team-text { color: color-mix(in srgb, var(--team, var(--game-accent)) 78%, var(--text-primary)); }
+
+  /* Team score chips under the header */
+  .rtr-score-chip {
+    background: color-mix(in srgb, var(--team) 8%, var(--bg-card));
+    border: 1px solid color-mix(in srgb, var(--team) 22%, var(--border));
+    transition: background-color 0.3s ease, border-color 0.3s ease;
+  }
+  .rtr-score-chip-mine { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--team) 60%, transparent); }
+  .rtr-score-chip-active {
+    background: color-mix(in srgb, var(--team) 18%, var(--bg-card));
+    border-color: color-mix(in srgb, var(--team) 55%, var(--border));
+  }
+
+  /* Emoji avatar bubble, ringed in the team color */
+  .rtr-avatar {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    line-height: 1;
+    background: radial-gradient(circle at 50% 35%, var(--bg-hover), var(--bg-card));
+    border: 2px solid color-mix(in srgb, var(--team, var(--border-light)) 55%, var(--border));
+    transition: box-shadow 0.2s ease, border-color 0.2s ease, opacity 0.3s ease, filter 0.3s ease;
+  }
+  .rtr-avatar-holding {
+    border-color: var(--game-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--game-accent) 30%, transparent);
+  }
+
+  /* The dial: a half-circle gauge drawn in SVG (pivot at 100,104 in the viewBox) */
+  .rtr-dial {
+    width: 100%;
+    max-width: 420px;
+    margin-inline: auto;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .rtr-dial-grab { cursor: grab; }
+  .rtr-dial-grab:active { cursor: grabbing; }
+  .rtr-dial-live .rtr-dial-svg { filter: drop-shadow(0 0 14px color-mix(in srgb, var(--game-accent) 35%, transparent)); }
+  .rtr-needle { transform-box: view-box; transform-origin: 100px 104px; transition: transform 90ms linear; }
+  .rtr-needle-direct { transition: none; }
+  .rtr-zone-open { transform-box: view-box; transform-origin: 100px 104px; animation: rtrZoneOpen 0.8s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .rtr-band-hit { animation: rtrBandHit 1.2s ease-in-out infinite; }
+  .rtr-thinking { transform-box: view-box; transform-origin: 100px 104px; animation: rtrThinking 2.6s ease-in-out infinite; }
+
+  /* Reveal pieces */
+  .rtr-points-pop { animation: rtrPointsPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  .rtr-score-pop { animation: rtrPointsPop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  .rtr-call-in { animation: rtrCallIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .rtr-bar-fill { animation: rtrBarGrow 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.2s backwards; transform-origin: left center; }
+
+  /* Two-tap lock-in: armed state pulses */
+  .rtr-lock-armed { animation: rtrLockPulse 0.9s ease-in-out infinite; }
+
+  /* Pair choice cards and the clue field */
+  .rtr-choice {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .rtr-choice-on {
+    border-color: var(--game-accent);
+    background: color-mix(in srgb, var(--game-accent) 10%, var(--bg-elevated));
+    box-shadow: 0 0 0 1px var(--game-accent);
+  }
+  .rtr-input { background: var(--bg-card); border: 1px solid var(--border-light); }
+  .rtr-input:focus { border-color: var(--game-accent); outline: none; }
+
+  /* Left / Right call buttons */
+  .rtr-side {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.15s ease;
+  }
+  .rtr-side:active { transform: scale(0.97); }
+  .rtr-side-on {
+    border-color: var(--game-accent);
+    background: color-mix(in srgb, var(--game-accent) 14%, var(--bg-elevated));
+    box-shadow: 0 0 0 1px var(--game-accent);
+  }
+
+  .rtr-sheet-up { animation: rulesSheetEnter 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+}
+
+@keyframes rtrZoneOpen {
+  0% { transform: scale(0.35); opacity: 0; }
+  70% { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes rtrBandHit {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+@keyframes rtrThinking {
+  0%, 100% { transform: rotate(-28deg); }
+  50% { transform: rotate(28deg); }
+}
+@keyframes rtrPointsPop {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.18); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes rtrCallIn {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes rtrBarGrow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes rtrLockPulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--game-accent) 55%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--game-accent) 0%, transparent); }
+}
+
+/* Short phones (iPhone SE): a smaller dial and no secondary notes, so the whole turn fits */
+@media (max-height: 720px) {
+  .rtr-compact { max-width: 300px; }
+  .rtr-tall-only { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-game="read-the-room"] *,
+  [data-game="read-the-room"] *::before,
+  [data-game="read-the-room"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

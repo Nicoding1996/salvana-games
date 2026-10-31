@@ -219,7 +219,7 @@ export function useRoom() {
     getSocket().emit('hub:assignTeam', { playerId: targetPlayerId, teamId });
   }, []);
 
-  const startGame = useCallback((gameId: string, gameSettings?: Partial<import('@/types/games/liars-dice').LiarsDiceSettings> | Partial<import('@/types/games/battleship').BattleshipSettings> | Partial<import('@/types/games/poker').PokerSettings> | Partial<import('@/types/games/flip7').Flip7Settings>) => {
+  const startGame = useCallback((gameId: string, gameSettings?: Partial<import('@/types/games/liars-dice').LiarsDiceSettings> | Partial<import('@/types/games/battleship').BattleshipSettings> | Partial<import('@/types/games/poker').PokerSettings> | Partial<import('@/types/games/flip7').Flip7Settings> | Partial<import('@/types/games/read-the-room').ReadTheRoomSettings>) => {
     getSocket().emit('hub:startGame', gameId, gameSettings);
   }, []);
 

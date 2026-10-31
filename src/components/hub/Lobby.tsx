@@ -15,6 +15,8 @@ import type { PokerSettings } from '@/types/games/poker';
 import { DEFAULT_POKER_SETTINGS } from '@/types/games/poker';
 import type { Flip7Settings } from '@/types/games/flip7';
 import { DEFAULT_FLIP7_SETTINGS } from '@/types/games/flip7';
+import type { ReadTheRoomSettings } from '@/types/games/read-the-room';
+import { DEFAULT_READ_THE_ROOM_SETTINGS, RTR_GUESS_TIMER_OPTIONS, RTR_TARGET_SCORE_OPTIONS } from '@/types/games/read-the-room';
 import QRCode from '@/components/shared/QRCode';
 import { GameSelector } from '@/components/hub/GameCard';
 import { LogOutIcon } from '@/components/shared/Icons';
@@ -78,6 +80,9 @@ const FLIP7_MODE_OPTIONS: Option<'classic' | 'chaos'>[] = [
   { value: 'chaos', label: 'Chaos' },
 ];
 
+const RTR_TARGET_OPTIONS: Option<ReadTheRoomSettings['targetScore']>[] = RTR_TARGET_SCORE_OPTIONS.map((value) => ({ value, label: String(value) }));
+const RTR_TIMER_OPTIONS = timerOptions(RTR_GUESS_TIMER_OPTIONS);
+
 interface LobbyProps {
   roomHook: ReturnType<typeof useRoom>;
 }
@@ -92,6 +97,7 @@ export default function Lobby({ roomHook }: LobbyProps) {
   const [battleshipSettings, setBattleshipSettings] = useState<BattleshipSettings>({ ...DEFAULT_BATTLESHIP_SETTINGS });
   const [pokerSettings, setPokerSettings] = useState<PokerSettings>({ ...DEFAULT_POKER_SETTINGS });
   const [flip7Settings, setFlip7Settings] = useState<Flip7Settings>({ ...DEFAULT_FLIP7_SETTINGS });
+  const [rtrSettings, setRtrSettings] = useState<ReadTheRoomSettings>({ ...DEFAULT_READ_THE_ROOM_SETTINGS });
   const router = useRouter();
   if (!room) return null;
 
@@ -162,6 +168,8 @@ export default function Lobby({ roomHook }: LobbyProps) {
       startGame('poker', { ...pokerSettings, maxPlayers });
     } else if (selectedGame === 'flip7') {
       startGame('flip7', { ...flip7Settings, maxPlayers });
+    } else if (selectedGame === 'read-the-room') {
+      startGame('read-the-room', { ...rtrSettings });
     } else {
       startGame('story-thief');
     }
@@ -390,21 +398,44 @@ export default function Lobby({ roomHook }: LobbyProps) {
               onChange={(teamCount) => updateSettings({ teamCount })}
             />
           </SettingRow>
-          <SettingRow label="Mode">
-            <OptionGroup
-              label="Round mode"
-              options={ROUND_MODE_OPTIONS}
-              value={room.settings.roundMode}
-              onChange={(roundMode) => updateSettings({ roundMode })}
-            />
-          </SettingRow>
-          {room.settings.roundMode === 'timed' && (
+          {/* Whose Truth? keeps its settings on the room; Read the Room sends its own with the start */}
+          {selectedGame === 'story-thief' && (
+            <SettingRow label="Mode">
+              <OptionGroup
+                label="Round mode"
+                options={ROUND_MODE_OPTIONS}
+                value={room.settings.roundMode}
+                onChange={(roundMode) => updateSettings({ roundMode })}
+              />
+            </SettingRow>
+          )}
+          {selectedGame === 'story-thief' && room.settings.roundMode === 'timed' && (
             <SettingRow label="Timer">
               <OptionGroup
                 label="Question timer"
                 options={ROUND_TIMER_OPTIONS}
                 value={room.settings.timerSeconds}
                 onChange={(timerSeconds) => updateSettings({ timerSeconds })}
+              />
+            </SettingRow>
+          )}
+          {selectedGame === 'read-the-room' && (
+            <SettingRow label="Target score" hint="First team to reach it wins">
+              <OptionGroup
+                label="Target score"
+                options={RTR_TARGET_OPTIONS}
+                value={rtrSettings.targetScore}
+                onChange={(targetScore) => setRtrSettings((s) => ({ ...s, targetScore }))}
+              />
+            </SettingRow>
+          )}
+          {selectedGame === 'read-the-room' && (
+            <SettingRow label="Guess timer" hint="Locks the dial when it runs out">
+              <OptionGroup
+                label="Guess timer"
+                options={RTR_TIMER_OPTIONS}
+                value={rtrSettings.guessTimer}
+                onChange={(guessTimer) => setRtrSettings((s) => ({ ...s, guessTimer }))}
               />
             </SettingRow>
           )}

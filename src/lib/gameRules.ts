@@ -253,4 +253,45 @@ export const GAME_RULES: Record<string, GameRulesData> = {
     ],
   },
 
+  'read-the-room': {
+    icon: '🧭',
+    name: 'Read the Room',
+    summary: 'A team guessing game. Each round, one player sees a hidden target on a scale between two opposites, like Cold ↔ Hot, and gives a short clue. Their team turns a shared dial to where they think the target is. The closer the dial lands, the more points. First team to the target score wins.',
+    sections: [
+      {
+        title: 'Each Round',
+        items: [
+          { bullet: '🎯', text: 'One player on the team whose turn it is gives the clue. Only they see where the target is.' },
+          { bullet: '🃏', text: 'They pick one of two scales and type a clue that points to the target. No numbers, and no words from the scale.' },
+          { bullet: '🧭', text: 'Their team talks it over and drags the shared dial. Anyone on the team can move it. Lock it in when you agree.' },
+          { bullet: '🤐', text: 'The clue-giver stays quiet while the team talks.' },
+          { bullet: '↔️', text: 'The other teams call whether the target is left or right of the needle.' },
+        ],
+        example: 'Scale: Cold ↔ Hot. The target is just past the middle toward Hot. The clue: "a spring day". The team drags the needle a little right of center.',
+      },
+      {
+        title: 'Scoring',
+        items: [
+          { bullet: '4', text: 'The needle lands in the middle band of the target.' },
+          { bullet: '3', text: 'It lands in one of the bands right next to it.' },
+          { bullet: '2', text: 'It lands in one of the outer bands.' },
+          { bullet: '+1', text: 'For each other team whose left/right call is correct, unless the team scored 4.' },
+        ],
+      },
+      {
+        title: 'Winning',
+        items: [
+          { bullet: '🏆', text: 'After a reveal, a team alone at the top with at least the target score (5, 10 or 15) wins. Tied at the top? Keep playing.' },
+          { bullet: '🔁', text: 'Teams take turns, and everyone on a team takes turns giving the clue.' },
+        ],
+      },
+    ],
+    tips: [
+      'Pick the scale you have the best clue for.',
+      'Think about what your team would say, not what you think.',
+      'Argue it out before locking in: everyone sees the same dial move.',
+      'Opinion scales like Underrated ↔ Overrated make the best debates.',
+    ],
+  },
+
 };

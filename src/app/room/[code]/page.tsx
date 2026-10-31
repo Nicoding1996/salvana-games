@@ -9,6 +9,7 @@ import LiarsDiceGame from '@/components/games/liars-dice/LiarsDiceGame';
 import BattleshipGame from '@/components/games/battleship/BattleshipGame';
 import PokerGame from '@/components/games/poker/PokerGame';
 import Flip7Game from '@/components/games/flip7/Flip7Game';
+import ReadTheRoomGame from '@/components/games/read-the-room/ReadTheRoomGame';
 
 // ---- The name + room this tab last joined with (sessionStorage) ----
 // Read through useSyncExternalStore: null while prerendering, the real value once hydrated.
@@ -154,6 +155,8 @@ export default function RoomPage() {
         <PokerGame roomHook={gameRoomHook} />
       ) : inGame && room.currentGameId === 'flip7' ? (
         <Flip7Game roomHook={gameRoomHook} />
+      ) : inGame && room.currentGameId === 'read-the-room' ? (
+        <ReadTheRoomGame roomHook={gameRoomHook} />
       ) : (
         <Lobby roomHook={roomHook} />
       )}

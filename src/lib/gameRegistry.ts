@@ -151,6 +151,26 @@ export const GAME_REGISTRY: GameDefinition[] = [
     bestWith: '4–7 players',
     dataGameAttr: 'flip-7',
   },
+  {
+    id: 'read-the-room',
+    name: 'Read the Room',
+    icon: '🧭',
+    tagline: 'One clue. Find the spot.',
+    hook: 'One player sees a hidden spot between two opposites and gives one clue. Can your team find it?',
+    howToPlay: 'Each round, one player sees a hidden target on a scale like Cold ↔ Hot and types a short clue. Their team turns a shared dial to where they think it is. The closer, the more points. First team to the target score wins.',
+    minPlayers: 4,
+    maxPlayers: 18,
+    duration: '15–30 min',
+    difficulty: 'casual',
+    categories: ['social', 'teams'],
+    isTeamGame: true,
+    accentColor: '--game-accent',
+    accentHex: '#e879f9',
+    secondaryHex: '#facc15',
+    badge: 'NEW',
+    bestWith: '6–12 players',
+    dataGameAttr: 'read-the-room',
+  },
 ];
 
 // ============================================

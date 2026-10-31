@@ -8,6 +8,7 @@ import type { LiarsDiceClientState, LiarsDiceSettings, LiarsDiceTurnTimer } from
 import type { BattleshipClientState, BattleshipSettings, BattleshipTimer, ShipPlacement, Coordinate, ShotEntry } from './games/battleship';
 import type { PokerClientState, PokerSettings, PokerTurnTimer, BettingAction } from './games/poker';
 import type { Flip7ClientState, Flip7Settings, Flip7FlipEvent, Flip7ActionEvent } from './games/flip7';
+import type { ReadTheRoomClientState, ReadTheRoomDial, ReadTheRoomSettings, ReadTheRoomSide, ReadTheRoomTimer } from './games/read-the-room';
 
 // ---- Hub Events: Client → Server ----
 export interface ClientToServerEvents {
@@ -19,7 +20,7 @@ export interface ClientToServerEvents {
   'hub:assignTeam': (data: { playerId: string; teamId: string }) => void;
   'hub:shuffleTeams': () => void;
   'hub:selectGame': (gameId: string) => void;
-  'hub:startGame': (gameId: string, gameSettings?: Partial<LiarsDiceSettings> | Partial<BattleshipSettings> | Partial<PokerSettings> | Partial<Flip7Settings>) => void;
+  'hub:startGame': (gameId: string, gameSettings?: Partial<LiarsDiceSettings> | Partial<BattleshipSettings> | Partial<PokerSettings> | Partial<Flip7Settings> | Partial<ReadTheRoomSettings>) => void;
   'hub:requestState': () => void;
   'hub:kickPlayer': (data: { playerId: string }) => void;
   'hub:changeAvatar': (data: { avatar: string }) => void;
@@ -61,6 +62,18 @@ export interface ClientToServerEvents {
   'flip7:nextRound': () => void;
   'flip7:endGame': () => void;
   'flip7:rematch': () => void;
+
+  // Read the Room
+  'read-the-room:giveClue': (data: { pairId: number; clue: string }) => void;
+  'read-the-room:dialMove': (data: { position: number }) => void;
+  'read-the-room:dialRelease': (data: { position: number }) => void;  // final position when the holder lets go
+  'read-the-room:lockIn': () => void;
+  'read-the-room:pickCall': (data: { side: ReadTheRoomSide }) => void;
+  'read-the-room:lockCall': () => void;
+  'read-the-room:skipClueGiver': () => void;  // host
+  'read-the-room:nextRound': () => void;      // host
+  'read-the-room:endGame': () => void;        // host: summary first, then lobby
+  'read-the-room:rematch': () => void;        // host
 }
 
 // ---- Hub Events: Server → Client ----
@@ -97,4 +110,9 @@ export interface ServerToClientEvents {
   'flip7:chaosFlips': (flips: Flip7FlipEvent[]) => void;
   'flip7:turnTimer': (secondsLeft: number | null) => void;  // null = no countdown running
   'flip7:actionUsed': (data: Flip7ActionEvent) => void;
+
+  // Read the Room
+  'read-the-room:stateUpdated': (state: ReadTheRoomClientState) => void;
+  'read-the-room:dial': (dial: ReadTheRoomDial) => void;              // the shared dial moved or was let go
+  'read-the-room:timer': (timer: ReadTheRoomTimer | null) => void;    // null = no countdown running
 }

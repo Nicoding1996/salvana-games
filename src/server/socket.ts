@@ -8,7 +8,9 @@ import * as LiarsDice from './games/liars-dice/LiarsDiceGame';
 import * as Battleship from './games/battleship/BattleshipGame';
 import * as Poker from './games/poker/PokerGame';
 import * as Flip7 from './games/flip7/Flip7Game';
+import * as ReadTheRoom from './games/read-the-room/ReadTheRoomGame';
 import { MAX_STORY_LENGTH, MIN_TEAM_SIZE, STORY_REVEAL_MS } from '@/types/games/story-thief';
+import { type ReadTheRoomSettings, RTR_HOLD_IDLE_MS, RTR_MIN_TEAM_SIZE } from '@/types/games/read-the-room';
 import {
   type LiarsDiceSettings,
   LIARS_DICE_MIN_PLAYERS,
@@ -129,6 +131,11 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
           // Everyone needs the new ID (turn order, active player), not just the rejoining socket
           broadcastFlip7State(io, result.room);
           resumeFlip7IfPaused(io, result.room);
+        }
+        if (result.room.currentGameId === 'read-the-room') {
+          ReadTheRoom.swapPlayerId(result.room.code, result.oldId, socket.id);
+          // Everyone needs the new ID, and a clue or a waiting game may move on now
+          progressReadTheRoom(io, result.room);
         }
       } else {
         console.log(`[Room] ${data.playerName} joined ${data.code}`);
@@ -278,6 +285,22 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
 
         console.log(`[Game] Flip 7 started in ${room.code}`);
       }
+
+      if (gameId === 'read-the-room') {
+        const short = ReadTheRoom.unplayableTeams(room);
+        if (short.length > 0) {
+          socket.emit('hub:error', `Each team needs at least ${RTR_MIN_TEAM_SIZE} players online (${short.join(', ')})`);
+          return;
+        }
+        room.currentGameId = 'read-the-room';
+        room.selectedGameId = 'read-the-room';
+        room.phase = 'playing';
+        ReadTheRoom.createGame(room, gameSettings as Partial<ReadTheRoomSettings>);
+
+        io.to(room.code).emit('hub:roomUpdated', room);
+        driveReadTheRoom(io, room);
+        console.log(`[Game] Read the Room started in ${room.code}`);
+      }
     });
 
     // ---- State Refresh (for mobile wake-up) ----
@@ -322,6 +345,11 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         if (clientState) {
           socket.emit('flip7:stateUpdated', clientState);
         }
+      }
+      if (room.currentGameId === 'read-the-room') {
+        // The state carries the dial and a snapshot of any running countdown
+        const clientState = ReadTheRoom.getClientState(room.code, socket.id, room);
+        if (clientState) socket.emit('read-the-room:stateUpdated', clientState);
       }
       console.log(`[Socket] State refresh for ${socket.id}`);
     });
@@ -717,6 +745,122 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       console.log(`[Game] Flip 7 rematch in ${room.code}`);
     });
 
+    // ---- Read the Room Events ----
+
+    socket.on('read-the-room:giveClue', (data) => {
+      const room = readTheRoomRoom(socket.id);
+      if (!room) return;
+      const pairId = typeof data?.pairId === 'number' ? data.pairId : NaN;
+      const result = ReadTheRoom.giveClue(room.code, room, socket.id, pairId, String(data?.clue ?? ''));
+      if ('error' in result) {
+        socket.emit('hub:error', result.error);
+        emitReadTheRoomState(io, room, socket.id); // unlocks the sender's button; their typed clue stays
+        return;
+      }
+      driveReadTheRoom(io, room);
+    });
+
+    // High-frequency: relayed straight to the room without a full state broadcast
+    socket.on('read-the-room:dialMove', (data) => {
+      const room = readTheRoomRoom(socket.id);
+      if (!room) return;
+      // Only real numbers count (Number(null) would be 0)
+      const position = typeof data?.position === 'number' ? data.position : NaN;
+      const dial = ReadTheRoom.moveDial(room.code, room, socket.id, position, Date.now());
+      if (!dial) return; // not a Guesser, too fast, or someone else holds the dial
+      socket.to(room.code).volatile.emit('read-the-room:dial', dial);
+      const holderId = socket.id;
+      ReadTheRoom.setHoldTimer(room.code, setTimeout(() => {
+        const released = ReadTheRoom.expireHold(room.code, holderId, Date.now());
+        if (released) io.to(room.code).emit('read-the-room:dial', released);
+      }, RTR_HOLD_IDLE_MS));
+    });
+
+    socket.on('read-the-room:dialRelease', (data) => {
+      const room = readTheRoomRoom(socket.id);
+      if (!room) return;
+      const position = typeof data?.position === 'number' ? data.position : NaN;
+      const dial = ReadTheRoom.releaseDial(room.code, room, socket.id, position, Date.now());
+      if (!dial) return;
+      ReadTheRoom.clearHoldTimer(room.code);
+      io.to(room.code).emit('read-the-room:dial', dial);
+    });
+
+    socket.on('read-the-room:lockIn', () => {
+      const room = readTheRoomRoom(socket.id);
+      if (!room) return;
+      if (!ReadTheRoom.lockIn(room.code, room, socket.id)) {
+        emitReadTheRoomState(io, room, socket.id);
+        return;
+      }
+      ReadTheRoom.clearHoldTimer(room.code);
+      driveReadTheRoom(io, room);
+    });
+
+    socket.on('read-the-room:pickCall', (data) => {
+      const room = readTheRoomRoom(socket.id);
+      if (!room) return;
+      const side = data?.side === 'left' || data?.side === 'right' ? data.side : null;
+      if (!side || !ReadTheRoom.pickCall(room.code, room, socket.id, side)) return;
+      broadcastReadTheRoomState(io, room); // teammates see the pick; the call clock keeps running
+    });
+
+    socket.on('read-the-room:lockCall', () => {
+      const room = readTheRoomRoom(socket.id);
+      if (!room) return;
+      if (!ReadTheRoom.lockCall(room.code, room, socket.id)) {
+        emitReadTheRoomState(io, room, socket.id);
+        return;
+      }
+      driveReadTheRoom(io, room); // reveals once every calling team has locked in
+    });
+
+    socket.on('read-the-room:skipClueGiver', () => {
+      const room = readTheRoomRoom(socket.id);
+      if (!room || room.hostId !== socket.id) return;
+      if (ReadTheRoom.skipClueGiver(room.code, room)) driveReadTheRoom(io, room);
+    });
+
+    socket.on('read-the-room:nextRound', () => {
+      const room = readTheRoomRoom(socket.id);
+      if (!room || room.hostId !== socket.id) return;
+      if (ReadTheRoom.nextRound(room.code, room, Date.now())) driveReadTheRoom(io, room);
+    });
+
+    socket.on('read-the-room:endGame', () => {
+      const room = readTheRoomRoom(socket.id);
+      if (!room || room.hostId !== socket.id) return;
+
+      // Summary screen → back to the lobby. Keep selectedGameId so the lobby remembers the game.
+      if (ReadTheRoom.getGameState(room.code)?.phase === 'finished') {
+        ReadTheRoom.cleanupGame(room.code);
+        room.phase = 'lobby';
+        room.currentGameId = null;
+        io.to(room.code).emit('hub:roomUpdated', room);
+        return;
+      }
+
+      // Mid-game: show the summary first
+      if (ReadTheRoom.endGame(room.code)) driveReadTheRoom(io, room);
+    });
+
+    socket.on('read-the-room:rematch', () => {
+      const room = readTheRoomRoom(socket.id);
+      if (!room || room.hostId !== socket.id) return;
+      if (ReadTheRoom.getGameState(room.code)?.phase !== 'finished') return;
+
+      const short = ReadTheRoom.unplayableTeams(room);
+      if (short.length > 0) {
+        socket.emit('hub:error', `Each team needs at least ${RTR_MIN_TEAM_SIZE} players online (${short.join(', ')})`);
+        return;
+      }
+      if (!ReadTheRoom.rematch(room.code, room)) return;
+      room.phase = 'playing';
+      io.to(room.code).emit('hub:roomUpdated', room);
+      driveReadTheRoom(io, room);
+      console.log(`[Game] Read the Room rematch in ${room.code}`);
+    });
+
     // ---- Disconnect ----
 
     socket.on('disconnect', () => {
@@ -757,6 +901,11 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
             armFlip7Grace(io, room, socket.id);
           }
         }
+
+        if (room.currentGameId === 'read-the-room') {
+          // Shows them away, lets go of the dial, and starts a grace period if the round waits on them
+          progressReadTheRoom(io, room);
+        }
       }
       console.log(`[Socket] Disconnected: ${socket.id}`);
     });
@@ -783,6 +932,9 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
         handleGameDeparture(io, result.room, socketId);
       }
     }
+
+    // Read the Room: drop pair history and game state of rooms that are gone
+    ReadTheRoom.pruneRooms(RoomManager.getRoom);
   }, 60 * 1000);
 
   return io;
@@ -795,6 +947,7 @@ function handleGameDeparture(io: SocketIOServer, room: Room, playerId: string): 
   if (room.currentGameId === 'battleship') handleBattleshipDeparture(io, room, playerId);
   if (room.currentGameId === 'poker') handlePokerDeparture(io, room, playerId);
   if (room.currentGameId === 'flip7') handleFlip7Departure(io, room, playerId);
+  if (room.currentGameId === 'read-the-room') handleReadTheRoomDeparture(io, room, playerId);
 }
 
 /** Device token sent by the browser (random, kept in localStorage). Anything else counts as none. */
@@ -1723,4 +1876,79 @@ function handleFlip7Departure(io: SocketIOServer, room: Room, playerId: string):
   }
   Flip7.clearRoomTimer(room.code);
   advanceFlip7(io, room, outcome, STAY_ROUND_END_DELAY_MS);
+}
+
+// ---- Read the Room Helpers ----
+
+/** The sender's room, if it's playing Read the Room right now. */
+function readTheRoomRoom(socketId: string): Room | null {
+  const room = RoomManager.getRoomByPlayer(socketId);
+  if (!room || room.currentGameId !== 'read-the-room' || !ReadTheRoom.getGameState(room.code)) return null;
+  return room;
+}
+
+function emitReadTheRoomState(io: SocketIOServer, room: Room, playerId: string): void {
+  const clientState = ReadTheRoom.getClientState(room.code, playerId, room);
+  if (clientState) io.to(playerId).emit('read-the-room:stateUpdated', clientState);
+}
+
+function broadcastReadTheRoomState(io: SocketIOServer, room: Room): void {
+  for (const pid of Object.keys(room.players)) {
+    if (room.players[pid].connected) emitReadTheRoomState(io, room, pid);
+  }
+}
+
+/**
+ * Single entry point after every Read the Room transition: one pending step (guess clock,
+ * call clock or away grace) and one 1 s ticker per room. Deadlines that are already running
+ * are kept, so a reconnect or a broadcast never resets a clock. Nothing runs while nobody is online.
+ */
+function driveReadTheRoom(io: SocketIOServer, room: Room): void {
+  const state = ReadTheRoom.getGameState(room.code);
+  if (!state) return;
+  ReadTheRoom.clearPhaseTimers(room.code);
+
+  if (state.phase === 'finished' && room.phase !== 'finished') {
+    room.phase = 'finished';
+    io.to(room.code).emit('hub:roomUpdated', room);
+  }
+  if (!anyoneOnline(room)) {
+    ReadTheRoom.pauseClocks(room.code); // fresh clocks when someone is back
+    return;
+  }
+
+  const step = ReadTheRoom.nextStep(room.code, room, Date.now());
+  broadcastReadTheRoomState(io, room);
+  if (!step) {
+    io.to(room.code).emit('read-the-room:timer', null);
+    return;
+  }
+
+  const { phase, roundNumber } = state;
+  const tick = () => io.to(room.code).emit('read-the-room:timer', {
+    kind: step.kind,
+    secondsLeft: Math.max(0, Math.ceil((step.at - Date.now()) / 1000)),
+    total: step.total,
+  });
+  tick();
+  ReadTheRoom.setTicker(room.code, setInterval(tick, 1000));
+  ReadTheRoom.setPhaseTimer(room.code, setTimeout(() => {
+    ReadTheRoom.clearPhaseTimers(room.code);
+    if (ReadTheRoom.getGameState(room.code) !== state || state.phase !== phase || state.roundNumber !== roundNumber) return;
+    ReadTheRoom.runStep(room.code, room, step.kind, Date.now());
+    driveReadTheRoom(io, room);
+  }, Math.max(0, step.at - Date.now())));
+}
+
+/** After a disconnect, reconnect or departure: re-check what the round waits on, then drive. */
+function progressReadTheRoom(io: SocketIOServer, room: Room): void {
+  if (!ReadTheRoom.getGameState(room.code)) return;
+  ReadTheRoom.settle(room.code, room, Date.now());
+  driveReadTheRoom(io, room);
+}
+
+/** A player left for good: they're skipped from now on but stay in the recap and awards. */
+function handleReadTheRoomDeparture(io: SocketIOServer, room: Room, playerId: string): void {
+  if (!ReadTheRoom.removePlayer(room.code, playerId)) return;
+  progressReadTheRoom(io, room);
 }
