@@ -75,7 +75,7 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
     socket.on('hub:createRoom', (data, callback) => {
       const name = (data.playerName || '').trim().slice(0, 20);
       if (!name) { callback({ success: false, error: 'Name is required' }); return; }
-      const { room } = RoomManager.createRoom(socket.id, name);
+      const { room } = RoomManager.createRoom(socket.id, name, readDeviceToken(data.token));
       socket.join(room.code);
       callback({ success: true, room, playerId: socket.id });
       console.log(`[Room] Created ${room.code} by ${name}`);
@@ -86,7 +86,7 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
       const code = (data.code || '').trim().toUpperCase().slice(0, 4);
       if (!name) { callback({ success: false, error: 'Name is required' }); return; }
       if (!code) { callback({ success: false, error: 'Room code is required' }); return; }
-      const result = RoomManager.joinRoom(code, socket.id, name);
+      const result = RoomManager.joinRoom(code, socket.id, name, readDeviceToken(data.token));
       if ('error' in result) {
         callback({ success: false, error: result.error });
         return;
@@ -94,8 +94,13 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
 
       socket.join(result.room.code);
       callback({ success: true, room: result.room, playerId: socket.id });
+      if (result.kind === 'alreadyIn') return;
 
-      if (result.reconnected) {
+      if (result.kind === 'reconnected') {
+        // The old connection only looked alive (the phone noticed the drop first): close it.
+        // Its disconnect event finds no seat under the old ID and changes nothing.
+        if (result.replacedLiveSocket) io.sockets.sockets.get(result.oldId)?.disconnect(true);
+
         // Reconnecting player — swap IDs in game state and send current state
         console.log(`[Room] ${data.playerName} reconnected to ${data.code}`);
         if (result.room.currentGameId === 'story-thief') {
@@ -123,6 +128,7 @@ export function initSocket(httpServer: HTTPServer): SocketIOServer {
           }
           // Everyone needs the new ID (turn order, active player), not just the rejoining socket
           broadcastFlip7State(io, result.room);
+          resumeFlip7IfPaused(io, result.room);
         }
       } else {
         console.log(`[Room] ${data.playerName} joined ${data.code}`);
@@ -787,7 +793,17 @@ function handleGameDeparture(io: SocketIOServer, room: Room, playerId: string): 
   if (room.currentGameId === 'story-thief') progressStoryThief(io, room);
   if (room.currentGameId === 'liars-dice') handleLiarsDiceDeparture(io, room, playerId);
   if (room.currentGameId === 'battleship') handleBattleshipDeparture(io, room, playerId);
+  if (room.currentGameId === 'poker') handlePokerDeparture(io, room, playerId);
   if (room.currentGameId === 'flip7') handleFlip7Departure(io, room, playerId);
+}
+
+/** Device token sent by the browser (random, kept in localStorage). Anything else counts as none. */
+function readDeviceToken(value: unknown): string | null {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(value) ? value : null;
+}
+
+function anyoneOnline(room: Room): boolean {
+  return Object.values(room.players).some(p => p.connected);
 }
 
 // ---- Whose Truth? (story-thief) Helpers ----
@@ -1344,6 +1360,22 @@ function startPokerTurnTimer(io: SocketIOServer, room: Room): void {
   Poker.setRoomTimer(room.code, setInterval(tick, 1000));
 }
 
+/**
+ * A player left for good: their hand is folded and they're out of the tournament.
+ * If it was their turn (or only one player is left in the hand) play moves on now.
+ */
+function handlePokerDeparture(io: SocketIOServer, room: Room, playerId: string): void {
+  const outcome = Poker.removePlayer(room.code, playerId);
+  if (!outcome) return;
+  if (outcome === 'gameOver') {
+    room.phase = 'finished';
+    io.to(room.code).emit('hub:roomUpdated', room);
+  }
+  // 'seat': the hand carries on as it was, so the running clock and phase step stay
+  if (outcome === 'seat') broadcastPokerState(io, room);
+  else drivePoker(io, room);
+}
+
 /** Player came back: swap IDs, refresh everyone's seats, and restore a fair clock. */
 function handlePokerReconnect(io: SocketIOServer, room: Room, oldId: string, newId: string): void {
   Poker.swapPlayerId(room.code, oldId, newId);
@@ -1365,6 +1397,8 @@ function handlePokerReconnect(io: SocketIOServer, room: Room, oldId: string, new
 // Bumped on every Flip 7 state transition so a delayed "start the next turn"
 // callback from an earlier moment can tell it's stale.
 const flip7TurnTokens = new Map<string, number>();
+// Rooms where nobody is online: no clock runs and nobody is auto-played until someone is back
+const flip7Paused = new Set<string>();
 
 function bumpFlip7Token(roomCode: string): number {
   const token = (flip7TurnTokens.get(roomCode) ?? 0) + 1;
@@ -1375,6 +1409,7 @@ function bumpFlip7Token(roomCode: string): number {
 /** Drop every pending Flip 7 callback for a room (game ended or restarted). */
 function clearFlip7RoomTimers(roomCode: string): void {
   flip7TurnTokens.delete(roomCode);
+  flip7Paused.delete(roomCode);
   for (const [key, timer] of disconnectGraceTimers) {
     if (key.startsWith(`${roomCode}:`)) {
       clearTimeout(timer);
@@ -1469,6 +1504,10 @@ function beginFlip7Turn(io: SocketIOServer, room: Room): void {
   Flip7.clearRoomTimer(room.code);
   const state = Flip7.getGameState(room.code);
   if (!state || state.phase !== 'playing' || state.flipSevenAchievedBy) return;
+  if (!anyoneOnline(room)) {
+    flip7Paused.add(room.code);
+    return;
+  }
 
   if (state.pendingAction) {
     const seconds = state.settings.turnTimer || ACTION_TIMEOUT_MS / 1000;
@@ -1505,10 +1544,21 @@ function startFlip7Countdown(io: SocketIOServer, room: Room, seconds: number, on
     io.to(room.code).emit('flip7:turnTimer', secondsLeft);
     if (secondsLeft <= 0) {
       Flip7.clearRoomTimer(room.code);
+      if (!anyoneOnline(room)) {
+        flip7Paused.add(room.code); // the whole table is away: wait for them
+        return;
+      }
       onExpire();
     }
   }, 1000);
   Flip7.setRoomTimer(room.code, interval);
+}
+
+/** First player back at a paused table: start a fresh clock for whatever the table is waiting on. */
+function resumeFlip7IfPaused(io: SocketIOServer, room: Room): void {
+  if (!flip7Paused.delete(room.code)) return;
+  bumpFlip7Token(room.code); // a turn start still waiting on a reveal from before the pause is stale now
+  beginFlip7Turn(io, room);
 }
 
 /** After the grace period, act for an offline player the table is still waiting on. */
@@ -1520,6 +1570,10 @@ function armFlip7Grace(io: SocketIOServer, room: Room, playerId: string): void {
     disconnectGraceTimers.delete(key);
     if (room.players[playerId]?.connected) return; // came back
     if (!Flip7.isAwaitingPlayer(room.code, playerId)) return; // the moment has passed
+    if (!anyoneOnline(room)) {
+      flip7Paused.add(room.code); // nobody left to play against: wait for the table
+      return;
+    }
     const state = Flip7.getGameState(room.code);
     if (!state) return;
 

@@ -43,6 +43,7 @@ export function createGame(room: Room, settings?: Partial<PokerSettings>): Poker
       folded: false,
       allIn: false,
       alive: true,
+      left: false,
       inHand: false,
       stackAtHandStart: mergedSettings.startingChips,
     };
@@ -119,9 +120,10 @@ export function startNextHand(roomCode: string, handNumber: number): NextHandRes
   const state = games.get(roomCode);
   if (!state || state.phase !== 'roundEnd' || state.handNumber !== handNumber) return 'stale';
 
-  // Eliminate busted players — a smaller starting stack finishes lower
+  // Eliminate busted players — a smaller starting stack finishes lower.
+  // Players who left during the hand are already out.
   const busted = inHandIds(state)
-    .filter(id => state.playerData[id].chips <= 0)
+    .filter(id => state.playerData[id].alive && state.playerData[id].chips <= 0)
     .sort((a, b) => state.playerData[a].stackAtHandStart - state.playerData[b].stackAtHandStart);
   for (const id of busted) {
     state.playerData[id].alive = false;
@@ -240,6 +242,62 @@ export function handleDisconnectedTurn(roomCode: string, expectedPlayerId: strin
   return playerAction(roomCode, expectedPlayerId, toCall > 0 ? 'fold' : 'check').success;
 }
 
+/**
+ * How a departure changed the table: 'seat' = they're out but the hand carries on as it was,
+ * 'flow' = play moved on (it was their turn, or the hand is decided), 'gameOver' = one player left.
+ */
+export type DepartureOutcome = 'seat' | 'flow' | 'gameOver';
+
+/**
+ * A player left the room for good. Their hand is folded (chips already bet stay in the pot)
+ * and they're out of the tournament, placed below everyone still playing.
+ */
+export function removePlayer(roomCode: string, playerId: string): DepartureOutcome | null {
+  const state = games.get(roomCode);
+  const pd = state?.playerData[playerId];
+  if (!state || !pd || pd.left || state.phase === 'finished') return null;
+
+  pd.left = true;
+  if (!pd.alive) return 'seat'; // already busted: nothing changes at the table
+  pd.alive = false;
+  state.eliminationOrder.push({ id: playerId, eliminatedBy: null });
+
+  const wasActive = state.activePlayerId === playerId;
+  const handLive = pd.inHand && !pd.folded && (state.phase === 'dealing' || isBettingPhase(state.phase));
+  if (handLive) {
+    pd.folded = true;
+    state.actedThisRound.add(playerId);
+    logAction(state, playerId, 'fold', 0, state.phase === 'dealing' ? 'preflop' : state.phase);
+  }
+
+  const contenders = contenderIds(state);
+  if (state.seatingOrder.filter(id => state.playerData[id].alive).length <= 1) {
+    // Last one standing takes what's in the middle and wins
+    if (handLive && contenders.length === 1) finishUncontested(state, contenders[0]);
+    state.phase = 'finished';
+    state.activePlayerId = null;
+    state.runout = false;
+    state.nextHandAt = null;
+    return 'gameOver';
+  }
+
+  if (!handLive) return 'seat';
+  if (contenders.length === 1) {
+    finishUncontested(state, contenders[0]);
+    return 'flow';
+  }
+  if (wasActive) {
+    advanceAfterAction(state, playerId);
+    return 'flow';
+  }
+  // Nobody left to bet against (e.g. the player on turn faces only all-in hands): run it out
+  if (isBettingPhase(state.phase) && !state.runout && isBettingClosed(state)) {
+    startRunout(state);
+    return 'flow';
+  }
+  return 'seat';
+}
+
 // ---- Public API: queries ----
 
 export function getGameState(roomCode: string): PokerServerState | undefined {
@@ -295,6 +353,7 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
       alive: pd.alive,
       inHand: pd.inHand,
       connected: room.players[id]?.connected ?? false,
+      left: pd.left,
       isDealer: id === state.dealerId,
       isSmallBlind: pd.inHand && id === state.smallBlindId,
       isBigBlind: pd.inHand && id === state.bigBlindId,
@@ -360,6 +419,7 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
       avatar: labelOf(e.id).avatar,
       place: totalSeats - i,
       eliminatedBy: e.eliminatedBy ? labelOf(e.eliminatedBy).name : null,
+      left: state.playerData[e.id]?.left ?? false,
     })),
     winnerId,
     superlatives: state.phase === 'finished' ? buildSuperlatives(state, id => labelOf(id).name) : [],

@@ -172,6 +172,7 @@ export interface PokerPlayerInfo {
   alive: boolean;            // still in the tournament (has chips)
   inHand: boolean;           // dealt into the current hand
   connected: boolean;
+  left: boolean;             // left the room for good (out of the tournament)
   isDealer: boolean;
   isSmallBlind: boolean;
   isBigBlind: boolean;
@@ -216,6 +217,7 @@ export interface PokerEliminationInfo {
   avatar: string;
   place: number;              // finishing position (1 = winner)
   eliminatedBy: string | null; // name of the player who won the deciding pot
+  left: boolean;              // left the room instead of busting
 }
 
 export interface PokerClientState {
@@ -259,6 +261,7 @@ export interface PokerPlayerState {
   folded: boolean;
   allIn: boolean;
   alive: boolean;                      // still in tournament
+  left: boolean;                       // left the room for good (counts as out)
   inHand: boolean;                     // dealt into the current hand
   stackAtHandStart: number;            // tiebreak for same-hand eliminations
 }

@@ -11,9 +11,9 @@ import type { Flip7ClientState, Flip7Settings, Flip7FlipEvent, Flip7ActionEvent 
 
 // ---- Hub Events: Client → Server ----
 export interface ClientToServerEvents {
-  // Room
-  'hub:createRoom': (data: { playerName: string }, callback: (res: { success: boolean; room?: Room; playerId?: string; error?: string }) => void) => void;
-  'hub:joinRoom': (data: { code: string; playerName: string }, callback: (res: { success: boolean; room?: Room; playerId?: string; error?: string }) => void) => void;
+  // Room. `token` is this browser's device token: it lets a player take their own seat back.
+  'hub:createRoom': (data: { playerName: string; token?: string }, callback: (res: { success: boolean; room?: Room; playerId?: string; error?: string }) => void) => void;
+  'hub:joinRoom': (data: { code: string; playerName: string; token?: string }, callback: (res: { success: boolean; room?: Room; playerId?: string; error?: string }) => void) => void;
   'hub:leaveRoom': () => void;
   'hub:updateSettings': (settings: Partial<RoomSettings>) => void;
   'hub:assignTeam': (data: { playerId: string; teamId: string }) => void;

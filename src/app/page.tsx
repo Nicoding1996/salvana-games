@@ -5,6 +5,7 @@ import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useRoom } from '@/lib/hub/useRoom';
 import { GAME_REGISTRY } from '@/lib/gameRegistry';
+import type { Room } from '@/types/hub';
 import GameShowcase from '@/components/hub/GameShowcase';
 import { AlertCircleIcon, ArrowLeftIcon, ChevronRightIcon, LogInIcon, PlusIcon } from '@/components/shared/Icons';
 
@@ -26,15 +27,16 @@ export default function Home() {
   const router = useRouter();
   const { createRoom, joinRoom, error, setError, leaveRoom, room } = useRoom();
 
-  // Landing on the home page always means "not in a room"
+  // Back here from a room without leaving it. A lobby is left, as its Leave button does. A game
+  // is kept, so a stray back swipe doesn't take you out of it: the banner offers both ways.
+  const [keptGame] = useState(() => !!room && room.phase !== 'lobby');
   useEffect(() => {
+    if (keptGame) return;
     if (room) {
       leaveRoom();
     } else {
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem('playerName');
-        sessionStorage.removeItem('roomCode');
-      }
+      sessionStorage.removeItem('playerName');
+      sessionStorage.removeItem('roomCode');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -68,6 +70,7 @@ export default function Home() {
     if (!canCreate || loading) return;
     setLoading(true);
     setError(null);
+    if (room) leaveRoom(); // a new room replaces the game you kept
     try {
       const created = await createRoom(trimmedName);
       router.push(`/room/${created.code}`);
@@ -81,6 +84,7 @@ export default function Home() {
     if (!canJoin || loading) return;
     setLoading(true);
     setError(null);
+    if (room && room.code !== code) leaveRoom(); // another room replaces the game you kept
     try {
       const joined = await joinRoom(code, trimmedName);
       router.push(`/room/${joined.code}`);
@@ -115,6 +119,10 @@ export default function Home() {
           Grab your phones. Pick a game. Bluff, bet, and betray your friends — all from the browser.
         </p>
       </header>
+
+      {keptGame && room && (
+        <StillInRoomBanner room={room} onBack={() => router.push(`/room/${room.code}`)} onLeave={leaveRoom} />
+      )}
 
       {/* Actions */}
       <div className="relative z-10 w-full max-w-sm mt-8">
@@ -245,6 +253,51 @@ export default function Home() {
 /* ============================================
    Sub-components
    ============================================ */
+
+const LEAVE_CONFIRM_MS = 3000;
+
+/** You came back here without leaving your game: go back to it, or leave (tap twice). */
+function StillInRoomBanner({ room, onBack, onLeave }: { room: Room; onBack: () => void; onLeave: () => void }) {
+  const [armed, setArmed] = useState(false);
+  const inGame = room.phase !== 'lobby';
+
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), LEAVE_CONFIRM_MS);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  return (
+    <section className="home-panel relative z-10 w-full max-w-sm mt-6 rounded-2xl p-4 animate-slide-up" aria-label="Your room">
+      <p className="font-heading text-base font-semibold text-(--text-primary)">
+        {inGame ? "You're still in a game" : "You're still in a room"}
+      </p>
+      <p className="mt-0.5 text-sm text-(--text-secondary)">
+        Room <span className="font-mono font-bold tracking-[0.2em] text-(--brand)">{room.code}</span>
+        {inGame && ' · leaving takes you out of it'}
+      </p>
+      <div className="mt-4 flex gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="h-12 flex-1 rounded-xl bg-(--brand) text-(--bg-primary) font-heading text-sm font-semibold cta-glow transition-transform active:scale-[0.98]"
+        >
+          {inGame ? 'Back to game' : 'Back to room'}
+        </button>
+        <button
+          type="button"
+          onClick={() => (armed ? onLeave() : setArmed(true))}
+          className={`h-12 shrink-0 rounded-xl px-4 text-sm font-semibold transition-colors ${
+            armed ? 'bg-(--danger) text-(--bg-primary)' : 'border border-(--border-light) text-(--text-secondary)'
+          }`}
+          aria-label={armed ? 'Tap again to leave the room' : 'Leave the room'}
+        >
+          {armed ? 'Tap again' : 'Leave'}
+        </button>
+      </div>
+    </section>
+  );
+}
 
 /** Decorative fan of game cards — a hand of games dealt on the table. */
 function HeroFan() {

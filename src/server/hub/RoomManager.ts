@@ -5,6 +5,9 @@ const rooms = new Map<string, Room>();
 const playerRoomMap = new Map<string, string>(); // socketId -> roomCode
 // Track when each player disconnected (socketId -> timestamp)
 const disconnectTimestamps = new Map<string, number>();
+// Device token of the browser that holds each seat (socketId -> token). Server-only:
+// never part of the Room object, which is broadcast to everyone.
+const playerTokens = new Map<string, string>();
 // How long to keep disconnected players before auto-removing (5 minutes)
 const DISCONNECT_CLEANUP_MS = 5 * 60 * 1000;
 
@@ -23,7 +26,7 @@ function getAvailableAvatar(room: Room): string {
   return available.length > 0 ? available[Math.floor(Math.random() * available.length)] : AVATARS[0];
 }
 
-export function createRoom(hostSocketId: string, playerName: string): { room: Room; player: Player } {
+export function createRoom(hostSocketId: string, playerName: string, token: string | null): { room: Room; player: Player } {
   const code = generateCode();
 
   const teams: Team[] = Array.from({ length: DEFAULT_SETTINGS.teamCount }, (_, i) => ({
@@ -58,6 +61,7 @@ export function createRoom(hostSocketId: string, playerName: string): { room: Ro
   room.players[hostSocketId] = player;
   rooms.set(code, room);
   playerRoomMap.set(hostSocketId, code);
+  if (token) playerTokens.set(hostSocketId, token);
 
   // Auto-assign host to first team
   autoAssignTeam(room, hostSocketId);
@@ -65,61 +69,41 @@ export function createRoom(hostSocketId: string, playerName: string): { room: Ro
   return { room, player };
 }
 
+export type JoinResult =
+  | { kind: 'joined'; room: Room; player: Player }
+  | { kind: 'reconnected'; room: Room; player: Player; oldId: string; replacedLiveSocket: boolean }
+  | { kind: 'alreadyIn'; room: Room; player: Player }   // this connection already holds the seat
+  | { error: string };
+
 /**
- * Join a room. If a player with the same name already exists and is disconnected,
- * reconnect them with the new socket ID instead of creating a duplicate.
+ * Join a room, or take your own seat back. A seat belongs to the device that took it: the
+ * same device token with the same name reclaims it, even while the server still thinks the
+ * old connection is alive (the phone noticed the drop first). Nobody else can claim a seat
+ * that has a device on record. Seats with no device on record (clients that send no token)
+ * can be reclaimed by name once they're offline.
  */
-export function joinRoom(code: string, socketId: string, playerName: string): { room: Room; player: Player; reconnected: boolean; oldId: string } | { error: string } {
+export function joinRoom(code: string, socketId: string, playerName: string, token: string | null): JoinResult {
   const room = rooms.get(code.toUpperCase());
   if (!room) return { error: 'Room not found' };
 
-  // Check if this is a reconnecting player (same name, disconnected)
-  const existingPlayer = Object.values(room.players).find(
-    p => p.name === playerName && !p.connected
-  );
+  // A second join from the same connection (e.g. the room page's fallback join)
+  const current = room.players[socketId];
+  if (current) {
+    return current.name === playerName ? { kind: 'alreadyIn', room, player: current } : { error: 'You are already in this room' };
+  }
 
-  if (existingPlayer) {
-    // Reconnect: swap old socket ID for new one
-    const oldId = existingPlayer.id;
-
-    // Clear disconnect timestamp since they're back
-    disconnectTimestamps.delete(oldId);
-
-    delete room.players[oldId];
-    playerRoomMap.delete(oldId);
-
-    existingPlayer.id = socketId;
-    existingPlayer.connected = true;
-    room.players[socketId] = existingPlayer;
-    playerRoomMap.set(socketId, code.toUpperCase());
-
-    // Update team playerIds
-    for (const team of room.teams) {
-      const idx = team.playerIds.indexOf(oldId);
-      if (idx !== -1) {
-        team.playerIds[idx] = socketId;
-      }
+  const sameName = Object.values(room.players).find(p => p.name === playerName);
+  if (sameName) {
+    const owner = playerTokens.get(sameName.id);
+    if ((token && owner === token) || (!owner && !sameName.connected)) {
+      return reclaimSeat(room, sameName, socketId, token);
     }
-
-    // If they were host, update host ID
-    if (room.hostId === oldId) {
-      room.hostId = socketId;
-    }
-
-    room.lastActivity = Date.now();
-    console.log(`[Room] ${playerName} reconnected to ${code} (${oldId} → ${socketId})`);
-    return { room, player: existingPlayer, reconnected: true, oldId };
+    return { error: 'Name already taken in this room' };
   }
 
   // New player joining
   if (room.phase !== 'lobby') return { error: 'Game already in progress' };
   if (Object.keys(room.players).length >= room.settings.maxPlayers) return { error: 'Room is full' };
-
-  // Reject duplicate names — prevents session hijacking on reconnect
-  const nameConflict = Object.values(room.players).find(
-    p => p.name === playerName && p.connected
-  );
-  if (nameConflict) return { error: 'Name already taken in this room' };
 
   const player: Player = {
     id: socketId,
@@ -132,11 +116,67 @@ export function joinRoom(code: string, socketId: string, playerName: string): { 
 
   room.players[socketId] = player;
   room.lastActivity = Date.now();
-  playerRoomMap.set(socketId, code.toUpperCase());
+  playerRoomMap.set(socketId, room.code);
+  if (token) playerTokens.set(socketId, token);
 
   autoAssignTeam(room, socketId);
+  takeHostIfVacant(room, player);
 
-  return { room, player, reconnected: false, oldId: '' };
+  return { kind: 'joined', room, player };
+}
+
+/** Move a seat to a new connection: same player, new socket ID everywhere in the room. */
+function reclaimSeat(room: Room, player: Player, socketId: string, token: string | null): JoinResult {
+  const oldId = player.id;
+  const replacedLiveSocket = player.connected;
+  const owner = playerTokens.get(oldId) ?? token;
+
+  disconnectTimestamps.delete(oldId);
+  playerRoomMap.delete(oldId);
+  playerTokens.delete(oldId);
+  delete room.players[oldId];
+
+  player.id = socketId;
+  player.connected = true;
+  room.players[socketId] = player;
+  playerRoomMap.set(socketId, room.code);
+  if (owner) playerTokens.set(socketId, owner);
+
+  for (const team of room.teams) {
+    const idx = team.playerIds.indexOf(oldId);
+    if (idx !== -1) team.playerIds[idx] = socketId;
+  }
+  if (room.hostId === oldId) room.hostId = socketId;
+  takeHostIfVacant(room, player);
+
+  room.lastActivity = Date.now();
+  console.log(`[Room] ${player.name} reconnected to ${room.code} (${oldId} → ${socketId})`);
+  return { kind: 'reconnected', room, player, oldId, replacedLiveSocket };
+}
+
+/**
+ * Host passes to the next online player when the host drops, so it ends up with whoever
+ * dropped last when everyone does. The first player back online takes it over.
+ */
+function takeHostIfVacant(room: Room, player: Player): void {
+  const host = room.players[room.hostId];
+  if (host?.connected) return;
+  if (host) host.isHost = false;
+  room.hostId = player.id;
+  player.isHost = true;
+  console.log(`[Room] Host was offline: ${player.name} is now host of ${room.code}`);
+}
+
+/** Delete a room and every per-player record that points at it. */
+function deleteRoom(code: string): void {
+  const room = rooms.get(code);
+  if (!room) return;
+  for (const pid of Object.keys(room.players)) {
+    playerRoomMap.delete(pid);
+    disconnectTimestamps.delete(pid);
+    playerTokens.delete(pid);
+  }
+  rooms.delete(code);
 }
 
 export function leaveRoom(socketId: string): { room: Room; wasHost: boolean } | null {
@@ -160,6 +200,7 @@ export function leaveRoom(socketId: string): { room: Room; wasHost: boolean } | 
   delete room.players[socketId];
   playerRoomMap.delete(socketId);
   disconnectTimestamps.delete(socketId); // Clean up in case they were marked disconnected
+  playerTokens.delete(socketId);
 
   // Transfer host
   if (wasHost) {
@@ -168,7 +209,7 @@ export function leaveRoom(socketId: string): { room: Room; wasHost: boolean } | 
       room.hostId = remaining[0];
       room.players[remaining[0]].isHost = true;
     } else {
-      rooms.delete(code);
+      deleteRoom(code);
       return null;
     }
   }
@@ -357,6 +398,7 @@ export function kickPlayer(hostSocketId: string, targetPlayerId: string): { room
   delete room.players[targetPlayerId];
   playerRoomMap.delete(targetPlayerId);
   disconnectTimestamps.delete(targetPlayerId);
+  playerTokens.delete(targetPlayerId);
 
   room.lastActivity = Date.now();
   console.log(`[Room] ${player.name} was kicked from ${room.code} by host`);
@@ -416,6 +458,7 @@ export function removeDisconnectedPlayer(socketId: string): { roomCode: string; 
   delete room.players[socketId];
   playerRoomMap.delete(socketId);
   disconnectTimestamps.delete(socketId);
+  playerTokens.delete(socketId);
 
   // If this was somehow still the host (shouldn't happen, but defensive), transfer
   if (room.hostId === socketId) {
@@ -427,7 +470,7 @@ export function removeDisconnectedPlayer(socketId: string): { roomCode: string; 
       // Check if there are any players at all (even disconnected)
       const anyPlayers = Object.keys(room.players);
       if (anyPlayers.length === 0) {
-        rooms.delete(code);
+        deleteRoom(code);
         return null;
       }
     }
@@ -459,12 +502,7 @@ setInterval(() => {
   const TWO_HOURS = 2 * 60 * 60 * 1000;
   for (const [code, room] of rooms) {
     if (now - room.lastActivity > TWO_HOURS) {
-      // Clean up all player references
-      for (const pid of Object.keys(room.players)) {
-        playerRoomMap.delete(pid);
-        disconnectTimestamps.delete(pid);
-      }
-      rooms.delete(code);
+      deleteRoom(code);
       console.log(`[Room] Stale room cleanup: deleted ${code}`);
     }
   }

@@ -19,7 +19,7 @@ export default function GameOver({ state, myId, isHost, onRematch, onBackToLobby
 
   // Winner first, then the rest by finishing place
   const standings = [
-    ...(winner ? [{ id: winner.id, name: winner.name, avatar: winner.avatar, place: 1, eliminatedBy: null as string | null }] : []),
+    ...(winner ? [{ id: winner.id, name: winner.name, avatar: winner.avatar, place: 1, eliminatedBy: null as string | null, left: false }] : []),
     ...[...state.eliminationOrder].sort((a, b) => a.place - b.place),
   ];
 
@@ -73,7 +73,10 @@ export default function GameOver({ state, myId, isHost, onRematch, onBackToLobby
                 {ordinal(p.place)}
               </span>
               <span className="text-xl" aria-hidden="true">{p.avatar}</span>
-              <span className="min-w-0 flex-1 truncate text-sm text-(--text-primary)">{p.id === myId ? 'You' : p.name}</span>
+              <span className="min-w-0 flex-1 truncate text-sm text-(--text-primary)">
+                {p.id === myId ? 'You' : p.name}
+                {p.left && <span className="ml-1.5 text-xs text-(--text-muted)">left</span>}
+              </span>
               {p.place === 1 ? (
                 <span aria-label="Winner">👑</span>
               ) : (

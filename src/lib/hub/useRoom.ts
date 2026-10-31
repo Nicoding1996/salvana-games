@@ -10,6 +10,41 @@ let _playerId: string | null = null;
 let _connected = false;
 const _listeners = new Set<() => void>();
 let _socketBound = false;
+let _deviceToken: string | null = null;
+
+const DEVICE_TOKEN_KEY = 'deviceToken';
+const DEVICE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
+
+/**
+ * Random ID for this browser, kept in localStorage so it survives reloads and a closed tab.
+ * The server ties each seat to it: this browser can always take its seat back, nobody else can.
+ * Falls back to sessionStorage (survives reloads in this tab) when localStorage is blocked.
+ * Uses getRandomValues (not randomUUID) so it also works on plain-HTTP LAN addresses.
+ */
+function deviceToken(): string {
+  if (_deviceToken) return _deviceToken;
+  const stores = [() => localStorage, () => sessionStorage];
+  for (const store of stores) {
+    try {
+      const stored = store().getItem(DEVICE_TOKEN_KEY);
+      if (stored && DEVICE_TOKEN_PATTERN.test(stored)) return (_deviceToken = stored);
+    } catch {
+      // This storage is blocked: try the next one
+    }
+  }
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const token = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  _deviceToken = token;
+  for (const store of stores) {
+    try {
+      store().setItem(DEVICE_TOKEN_KEY, token);
+      break;
+    } catch {
+      // Blocked: try the next one (with neither, the token lasts for this page)
+    }
+  }
+  return token;
+}
 
 function notifyListeners() {
   _listeners.forEach((fn) => fn());
@@ -41,17 +76,20 @@ function ensureSocketBound() {
     const storedName = typeof window !== 'undefined' ? sessionStorage.getItem('playerName') : null;
     const storedCode = typeof window !== 'undefined' ? sessionStorage.getItem('roomCode') : null;
 
-    // Only auto-rejoin if we're on the room page that matches the stored code.
-    // This prevents auto-rejoin when the user navigates to the home page.
+    // Auto-rejoin on the room page that matches the stored code, or anywhere while we still
+    // hold that room (the home page keeps a game you went back from without leaving it).
+    // A home page that left the room cleared the session, so it doesn't rejoin.
     const onMatchingRoomPage = typeof window !== 'undefined' && storedCode &&
       window.location.pathname.toLowerCase() === `/room/${storedCode.toLowerCase()}`;
+    const holdingRoom = !!storedCode && _room?.code === storedCode;
 
-    if (storedName && storedCode && onMatchingRoomPage) {
-      // We're on the matching room page — rejoin to re-register with the server
-      // This handles both reconnection (socket dropped) and full page refresh
+    if (storedName && storedCode && (onMatchingRoomPage || holdingRoom)) {
+      // Rejoin to re-register with the server. Handles both reconnection (socket dropped)
+      // and full page refresh. The device token gets our own seat back even if the server
+      // hasn't noticed the old connection died yet.
       const reason = _room ? 'Reconnected' : 'Connected with session data';
       console.log(`[useRoom] ${reason}, re-joining room ${storedCode} as ${storedName}`);
-      socket.emit('hub:joinRoom', { code: storedCode, playerName: storedName }, (res) => {
+      socket.emit('hub:joinRoom', { code: storedCode, playerName: storedName, token: deviceToken() }, (res) => {
         if (res.success && res.room && res.playerId) {
           setGlobalPlayerId(res.playerId);
           setGlobalRoom(res.room);
@@ -134,7 +172,7 @@ export function useRoom() {
   const createRoom = useCallback((playerName: string): Promise<Room> => {
     return new Promise((resolve, reject) => {
       const socket = getSocket();
-      socket.emit('hub:createRoom', { playerName }, (res) => {
+      socket.emit('hub:createRoom', { playerName, token: deviceToken() }, (res) => {
         if (res.success && res.room && res.playerId) {
           setGlobalRoom(res.room);
           setGlobalPlayerId(res.playerId);
@@ -155,7 +193,7 @@ export function useRoom() {
   const joinRoom = useCallback((code: string, playerName: string): Promise<Room> => {
     return new Promise((resolve, reject) => {
       const socket = getSocket();
-      socket.emit('hub:joinRoom', { code: code.toUpperCase(), playerName }, (res) => {
+      socket.emit('hub:joinRoom', { code: code.toUpperCase(), playerName, token: deviceToken() }, (res) => {
         if (res.success && res.room && res.playerId) {
           setGlobalRoom(res.room);
           setGlobalPlayerId(res.playerId);
