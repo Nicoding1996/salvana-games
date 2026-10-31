@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import type { Card, LoggedAction, PokerPlayerInfo, PokerTurnTimer } from '@/types/games/poker';
 import { sameCard } from '@/types/games/poker';
 import type { PokerReactionBubble } from '@/lib/games/poker/usePoker';
@@ -164,11 +165,32 @@ export default function PlayerSeat({
   );
 }
 
-/** Countdown ring around the avatar of the player on the clock */
+/** Steps between the server's once-a-second ticks */
+const RING_STEPS_PER_SECOND = 4;
+
+/**
+ * Countdown ring around the avatar of the player on the clock. It drains in quarter-second
+ * steps between the server's ticks: a CSS transition on stroke-dashoffset would repaint the
+ * ring and the felt under it on every frame.
+ */
 export function TimerRing({ secondsLeft, total, size = 52 }: { secondsLeft: number; total: number; size?: number }) {
+  // Steps taken since the last tick; a new tick starts over (adjust-state-while-rendering)
+  const [tick, setTick] = useState(secondsLeft);
+  const [steps, setSteps] = useState(0);
+  if (secondsLeft !== tick) {
+    setTick(secondsLeft);
+    setSteps(0);
+  }
+  useEffect(() => {
+    const id = setInterval(() => setSteps(s => Math.min(RING_STEPS_PER_SECOND - 1, s + 1)), 1000 / RING_STEPS_PER_SECOND);
+    return () => clearInterval(id);
+  }, [secondsLeft]);
+
   const r = size / 2 - 2;
   const circumference = 2 * Math.PI * r;
-  const fraction = total > 0 ? Math.max(0, Math.min(1, secondsLeft / total)) : 0;
+  const clamp = (x: number) => Math.max(0, Math.min(1, x));
+  const fraction = total > 0 ? clamp(secondsLeft / total) : 0;
+  const shown = total > 0 ? clamp((secondsLeft - steps / RING_STEPS_PER_SECOND) / total) : 0;
   const stroke = fraction > 0.5 ? 'var(--game-secondary)' : fraction > 0.25 ? 'var(--brand)' : 'var(--danger)';
   const inset = (size - 42) / 2;
 
@@ -191,8 +213,8 @@ export function TimerRing({ secondsLeft, total, size = 52 }: { secondsLeft: numb
         strokeWidth="3"
         strokeLinecap="round"
         strokeDasharray={circumference}
-        strokeDashoffset={circumference * (1 - fraction)}
-        style={{ transition: 'stroke-dashoffset 1s linear, stroke 0.3s ease' }}
+        strokeDashoffset={circumference * (1 - shown)}
+        style={{ transition: 'stroke 0.3s ease' }}
       />
     </svg>
   );

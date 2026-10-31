@@ -84,10 +84,11 @@ export default function PlayerRing({ players, phase, activePlayerId, myId, timer
               )}
               {myTimer && myTimer.total > 0 && (
                 <span className="absolute inset-x-2 bottom-0.5 h-[3px] overflow-hidden rounded-full bg-(--bg-primary)/60" aria-hidden="true">
+                  {/* Slides out (transform) instead of shrinking (width), so it doesn't repaint every frame */}
                   <span
-                    className="block h-full rounded-full transition-[width] duration-1000 ease-linear"
+                    className="block h-full w-full rounded-full transition-transform duration-1000 ease-linear"
                     style={{
-                      width: `${(myTimer.secondsLeft / myTimer.total) * 100}%`,
+                      transform: `translateX(${(myTimer.secondsLeft / myTimer.total) * 100 - 100}%)`,
                       background: myTimer.secondsLeft <= 5 ? 'var(--danger)' : 'var(--game-secondary)',
                     }}
                   />

@@ -76,9 +76,10 @@ export default function ActionBar({
         {myTimer && (
           <>
             <div className="h-1 flex-1 overflow-hidden rounded-full bg-(--text-primary)/10" aria-hidden="true">
+              {/* Slides out (transform) instead of shrinking (width), so it doesn't repaint every frame */}
               <div
-                className={`h-full rounded-full ${urgent ? 'bg-(--danger)' : 'bg-(--game-secondary)'}`}
-                style={{ width: `${(myTimer.secondsLeft / myTimer.total) * 100}%`, transition: 'width 1s linear' }}
+                className={`h-full w-full rounded-full ${urgent ? 'bg-(--danger)' : 'bg-(--game-secondary)'}`}
+                style={{ transform: `translateX(${(myTimer.secondsLeft / myTimer.total) * 100 - 100}%)`, transition: 'transform 1s linear' }}
               />
             </div>
             <span className={`w-8 text-right font-mono text-[13px] font-bold ${urgent ? 'animate-timer-urgent text-(--danger)' : 'text-(--text-secondary)'}`}>

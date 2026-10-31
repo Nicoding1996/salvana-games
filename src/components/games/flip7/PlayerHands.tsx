@@ -57,62 +57,65 @@ export function MyHand({
     zIndex: i,
   });
 
-  const shell = status === 'frozen' ? 'flip7-frost' : isTurn ? 'flip7-turn-glow' : '';
+  const frozen = status === 'frozen';
 
   return (
-    <section
-      aria-label="Your hand"
-      className={`flip7-card rounded-2xl p-3 ${shell} ${busted ? 'f7-busted f7-bust-row' : ''}`}
-    >
-      {status === 'frozen' && (
-        <span aria-hidden="true" className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-4xl opacity-20 select-none">❄️</span>
-      )}
-
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-lg" aria-hidden="true">{avatar}</span>
-          <h2 className="text-sm font-semibold text-(--text-primary)">Your hand</h2>
-          <StatusBadge status={status} ready={ready} picking={false} />
-        </div>
-        <p className="shrink-0 text-[11px] tabular-nums text-(--text-muted)">
-          Total <span className="text-sm font-bold text-(--text-primary)">{totalScore}</span> / {targetScore}
-        </p>
-      </div>
-
-      <div className="mt-1 flex h-[76px] items-end justify-center">
-        {slots === 0 ? (
-          <p className="self-center text-xs text-(--text-muted)">No numbers yet</p>
-        ) : (
-          <>
-            {sorted.map((v, i) => (
-              <div key={v} style={fan(i)}>
-                <NumberCard value={v} size="md" className="f7-land" />
-              </div>
-            ))}
-            {showBust && (
-              <div key="bust" style={fan(sorted.length)}>
-                <NumberCard value={bustCard} size="md" bust className="f7-land" />
-              </div>
-            )}
-          </>
+    // The turn glow sits on a wrapper: the hand clips its own contents
+    <div className={`rounded-2xl ${isTurn && !frozen ? 'flip7-turn-glow' : ''}`}>
+      <section
+        aria-label="Your hand"
+        className={`flip7-card rounded-2xl p-3 ${frozen ? 'flip7-frost' : ''} ${busted ? 'f7-busted f7-bust-row' : ''}`}
+      >
+        {frozen && (
+          <span aria-hidden="true" className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-4xl opacity-20 select-none">❄️</span>
         )}
-      </div>
 
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <FlipPips count={cards.length} />
-          {modifiers.map((m, i) => <ModifierChip key={`${m}-${i}`} kind={m} />)}
-          {secondChances > 0 && <SecondChanceChip count={secondChances} />}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="text-lg" aria-hidden="true">{avatar}</span>
+            <h2 className="text-sm font-semibold text-(--text-primary)">Your hand</h2>
+            <StatusBadge status={status} ready={ready} picking={false} />
+          </div>
+          <p className="shrink-0 text-[11px] tabular-nums text-(--text-muted)">
+            Total <span className="text-sm font-bold text-(--text-primary)">{totalScore}</span> / {targetScore}
+          </p>
         </div>
-        <p
-          className="shrink-0 text-base font-bold tabular-nums"
-          style={{ color: busted ? 'var(--danger)' : 'var(--game-accent)' }}
-          aria-label={busted ? 'Busted, 0 points this round' : `${score} points this round`}
-        >
-          {busted ? 'Bust' : `+${score}`}
-        </p>
-      </div>
-    </section>
+
+        <div className="mt-1 flex h-[76px] items-end justify-center">
+          {slots === 0 ? (
+            <p className="self-center text-xs text-(--text-muted)">No numbers yet</p>
+          ) : (
+            <>
+              {sorted.map((v, i) => (
+                <div key={v} style={fan(i)}>
+                  <NumberCard value={v} size="md" className="f7-land" />
+                </div>
+              ))}
+              {showBust && (
+                <div key="bust" style={fan(sorted.length)}>
+                  <NumberCard value={bustCard} size="md" bust className="f7-land" />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <FlipPips count={cards.length} />
+            {modifiers.map((m, i) => <ModifierChip key={`${m}-${i}`} kind={m} />)}
+            {secondChances > 0 && <SecondChanceChip count={secondChances} />}
+          </div>
+          <p
+            className="shrink-0 text-base font-bold tabular-nums"
+            style={{ color: busted ? 'var(--danger)' : 'var(--game-accent)' }}
+            aria-label={busted ? 'Busted, 0 points this round' : `${score} points this round`}
+          >
+            {busted ? 'Bust' : `+${score}`}
+          </p>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -136,44 +139,47 @@ export function OpponentRow({ player, isTurn, ready, picking }: OpponentRowProps
   const shell = frozen
     ? 'flip7-frost'
     : highlighted
-      ? 'border border-(--game-accent)/60 bg-(--game-accent)/5 flip7-turn-glow'
+      ? 'border border-(--game-accent)/60 bg-(--game-accent)/5'
       : 'border border-(--border) bg-(--bg-card)/70';
 
   return (
-    <div
-      data-active={highlighted ? 'true' : undefined}
-      className={`relative overflow-hidden rounded-xl px-3 py-2 ${shell} ${busted ? 'f7-busted f7-bust-row' : ''}`}
-    >
-      {frozen && (
-        <span aria-hidden="true" className="pointer-events-none absolute right-20 top-1/2 -translate-y-1/2 text-3xl opacity-20 select-none">❄️</span>
-      )}
+    // The turn glow sits on a wrapper: the row clips its own contents
+    <div className={`rounded-xl ${highlighted && !frozen ? 'flip7-turn-glow' : ''}`}>
+      <div
+        data-active={highlighted ? 'true' : undefined}
+        className={`relative overflow-hidden rounded-xl px-3 py-2 ${shell} ${busted ? 'f7-busted f7-bust-row' : ''}`}
+      >
+        {frozen && (
+          <span aria-hidden="true" className="pointer-events-none absolute right-20 top-1/2 -translate-y-1/2 text-3xl opacity-20 select-none">❄️</span>
+        )}
 
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="text-base" aria-hidden="true">{player.avatar}</span>
-        <span className="truncate text-[13px] font-semibold text-(--text-primary)">{player.name}</span>
-        {!player.connected && <Badge tone="var(--danger)">OFFLINE</Badge>}
-        <StatusBadge status={player.roundStatus} ready={ready} picking={picking} />
-        <span
-          className="ml-auto shrink-0 text-sm font-bold tabular-nums"
-          style={{ color: busted ? 'var(--danger)' : 'var(--text-primary)' }}
-        >
-          {busted ? 'Bust' : `+${score}`}
-        </span>
-      </div>
-
-      <div className="mt-1.5 flex items-center gap-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-[3px]">
-          {sorted.map(v => <NumberCard key={v} value={v} size="xs" className="f7-land" />)}
-          {busted && player.bustCard !== null && (
-            <NumberCard value={player.bustCard} size="xs" bust className="f7-land" />
-          )}
-          {player.modifiers.map((m, i) => <ModifierChip key={`${m}-${i}`} kind={m} small />)}
-          {player.hasSecondChance && <SecondChanceChip small />}
-          {empty && <span className="text-[10px] text-(--text-muted)">No cards yet</span>}
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-base" aria-hidden="true">{player.avatar}</span>
+          <span className="truncate text-[13px] font-semibold text-(--text-primary)">{player.name}</span>
+          {!player.connected && <Badge tone="var(--danger)">OFFLINE</Badge>}
+          <StatusBadge status={player.roundStatus} ready={ready} picking={picking} />
+          <span
+            className="ml-auto shrink-0 text-sm font-bold tabular-nums"
+            style={{ color: busted ? 'var(--danger)' : 'var(--text-primary)' }}
+          >
+            {busted ? 'Bust' : `+${score}`}
+          </span>
         </div>
-        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-(--text-muted)">
-          {player.cumulativeScore} pts
-        </span>
+
+        <div className="mt-1.5 flex items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-[3px]">
+            {sorted.map(v => <NumberCard key={v} value={v} size="xs" className="f7-land" />)}
+            {busted && player.bustCard !== null && (
+              <NumberCard value={player.bustCard} size="xs" bust className="f7-land" />
+            )}
+            {player.modifiers.map((m, i) => <ModifierChip key={`${m}-${i}`} kind={m} small />)}
+            {player.hasSecondChance && <SecondChanceChip small />}
+            {empty && <span className="text-[10px] text-(--text-muted)">No cards yet</span>}
+          </div>
+          <span className="ml-auto shrink-0 text-[11px] tabular-nums text-(--text-muted)">
+            {player.cumulativeScore} pts
+          </span>
+        </div>
       </div>
     </div>
   );

@@ -30,11 +30,13 @@ export default function TimerBar({ seconds, total, urgentAt = 5 }: TimerBarProps
       aria-valuemax={total}
       aria-valuenow={seconds}
     >
+      {/* Slides out instead of shrinking: a transform transition runs on the GPU,
+          a width transition re-lays out and repaints on every frame */}
       <div
-        className="h-full rounded-full"
+        className="h-full w-full rounded-full"
         style={{
-          width: `${pct}%`,
-          transition: instant ? 'none' : 'width 1s linear',
+          transform: `translateX(${pct - 100}%)`,
+          transition: instant ? 'none' : 'transform 1s linear',
           background: seconds <= urgentAt ? 'var(--danger)' : 'var(--game-accent)',
         }}
       />

@@ -128,7 +128,7 @@ export interface Flip7ClientState {
   pendingAction: PendingAction | null; // public, so everyone sees who is picking a target
   chaosSubmitted: string[];            // chaos mode: players who locked in a choice this tick
   roundScores: Flip7RoundScore[] | null;
-  roundHistory: Flip7RoundHistory[];
+  roundHistory: Flip7RoundHistory[];   // every round's scores, sent once the game is finished (empty before)
   winnerId: string | null;
   activityLog: ActivityLogEntry[];     // recent events (used for "X stayed" toasts)
   flipSevenAchievedBy: string | null;  // first player who got Flip 7 this round

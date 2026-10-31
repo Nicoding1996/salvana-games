@@ -625,7 +625,8 @@ export function getClientState(roomCode: string, playerId: string, room: Room): 
           .filter(s => present.includes(s.playerId))
           .map(s => ({ ...s, playerName: room.players[s.playerId]?.name || 'Unknown' }))
       : null,
-    roundHistory: state.roundHistory,
+    // Only the game-over screen reads it; sending it in every update grew each message ~870 B a round
+    roundHistory: state.phase === 'finished' ? state.roundHistory : [],
     winnerId: state.lastWinnerId,
     activityLog: state.activityLog.slice(-20),
     flipSevenAchievedBy: state.flipSevenAchievedBy,
